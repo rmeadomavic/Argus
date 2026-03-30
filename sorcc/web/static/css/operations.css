@@ -47,6 +47,96 @@
     color: var(--text-dim);
 }
 
+/* ── WiFi Capture Toggle ── */
+.wifi-capture-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-md);
+    padding: var(--gap-sm) var(--gap-md);
+    margin-bottom: var(--gap-md);
+    background: var(--bg-panel-gradient);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg);
+    flex-wrap: wrap;
+}
+
+.wifi-capture-info {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-sm);
+    flex: 1;
+    min-width: 150px;
+}
+
+.wifi-capture-label {
+    font-weight: 700;
+    font-size: var(--font-sm);
+    text-transform: uppercase;
+    letter-spacing: var(--ls-condensed);
+    color: var(--text-secondary);
+}
+
+.wifi-capture-status {
+    font-family: var(--font-mono);
+    font-size: var(--font-sm);
+    color: var(--text-dim);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+}
+
+.wifi-capture-status.active {
+    color: var(--signal-hot);
+    background: rgba(239, 83, 80, 0.15);
+}
+
+.wifi-capture-status.inactive {
+    color: var(--sorcc-green);
+    background: rgba(74, 124, 63, 0.15);
+}
+
+.wifi-capture-btn {
+    padding: 6px 16px;
+    border-radius: var(--radius-md);
+    font-weight: 700;
+    font-size: var(--font-sm);
+    text-transform: uppercase;
+    letter-spacing: var(--ls-condensed);
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    transition: all var(--transition-normal);
+    min-width: 100px;
+}
+
+.wifi-capture-btn:hover:not(:disabled) {
+    border-color: var(--sorcc-green);
+    color: var(--text-bright);
+}
+
+.wifi-capture-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.wifi-capture-btn.capturing {
+    background: rgba(239, 83, 80, 0.15);
+    border-color: var(--signal-hot);
+    color: var(--signal-hot);
+}
+
+.wifi-capture-btn.capturing:hover:not(:disabled) {
+    background: rgba(239, 83, 80, 0.25);
+}
+
+.wifi-capture-warning {
+    width: 100%;
+    font-size: var(--font-xs);
+    color: var(--signal-warm);
+    padding-top: 4px;
+}
+
 /* ── Sub-Tab Navigation ── */
 .sub-tabs {
     display: flex;

@@ -157,6 +157,116 @@ async def restart_lte():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _wifi_capture_status() -> dict[str, Any]:
+    """Check current wlan0 state: managed (connectivity) vs monitor (capture)."""
+    result: dict[str, Any] = {"active": False, "mode": "unknown", "interface": "wlan0"}
+    try:
+        r = subprocess.run(["iw", "dev", "wlan0", "info"], capture_output=True, text=True, timeout=5)
+        for line in r.stdout.splitlines():
+            if "type" in line:
+                mode = line.strip().split()[-1]
+                result["mode"] = mode
+                result["active"] = mode == "monitor"
+                break
+    except Exception:
+        pass
+    return result
+
+
+@app.get("/api/wifi-capture/status")
+async def wifi_capture_status():
+    return _wifi_capture_status()
+
+
+@app.post("/api/wifi-capture/toggle")
+async def wifi_capture_toggle():
+    """Toggle wlan0 between managed (WiFi connectivity) and monitor (Kismet capture).
+
+    When enabling capture: disconnect WiFi, set monitor mode, add wlan0 to Kismet.
+    When disabling capture: remove wlan0 from Kismet, restore managed mode, reconnect WiFi.
+    LTE + Tailscale remain available throughout.
+    """
+    current = _wifi_capture_status()
+
+    if current["active"]:
+        # ── Disable capture: monitor → managed ──
+        # 1. Remove wlan0 source from Kismet
+        try:
+            s = kismet_session()
+            r = s.get(f"{KISMET_URL}/datasource/all_sources.json", timeout=5)
+            if r.status_code == 200:
+                for src in r.json() if isinstance(r.json(), list) else []:
+                    iface = src.get("kismet.datasource.interface", "")
+                    if "wlan0" in iface:
+                        uuid = src.get("kismet.datasource.uuid")
+                        if uuid:
+                            s.post(f"{KISMET_URL}/datasource/by-uuid/{uuid}/close_source.cmd", timeout=5)
+        except Exception as e:
+            log.warning("Could not remove wlan0 from Kismet: %s", e)
+
+        # 2. Restore managed mode
+        try:
+            subprocess.run(["ip", "link", "set", "wlan0", "down"], timeout=5, check=True)
+            subprocess.run(["iw", "dev", "wlan0", "set", "type", "managed"], timeout=5, check=True)
+            subprocess.run(["ip", "link", "set", "wlan0", "up"], timeout=5, check=True)
+        except subprocess.CalledProcessError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to restore managed mode: {e}")
+
+        # 3. Reconnect WiFi via NetworkManager
+        try:
+            subprocess.run(["nmcli", "device", "set", "wlan0", "managed", "yes"], timeout=5)
+            # Find first WiFi connection profile and activate it
+            r = subprocess.run(
+                ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in r.stdout.strip().splitlines():
+                parts = line.split(":")
+                if len(parts) >= 2 and parts[-1] == "802-11-wireless":
+                    subprocess.run(["nmcli", "connection", "up", parts[0]], capture_output=True, timeout=10)
+                    break
+        except Exception as e:
+            log.warning("WiFi reconnect failed (LTE still available): %s", e)
+
+        return {"status": "ok", "active": False, "detail": "WiFi capture disabled — connectivity restored"}
+    else:
+        # ── Enable capture: managed → monitor ──
+        # 1. Disconnect WiFi
+        try:
+            subprocess.run(["nmcli", "device", "disconnect", "wlan0"], capture_output=True, timeout=5)
+        except Exception:
+            pass
+
+        # 2. Set monitor mode
+        try:
+            subprocess.run(["ip", "link", "set", "wlan0", "down"], timeout=5, check=True)
+            subprocess.run(["iw", "dev", "wlan0", "set", "type", "monitor"], timeout=5, check=True)
+            subprocess.run(["ip", "link", "set", "wlan0", "up"], timeout=5, check=True)
+        except subprocess.CalledProcessError as e:
+            # Try to restore managed on failure
+            subprocess.run(["iw", "dev", "wlan0", "set", "type", "managed"], capture_output=True, timeout=5)
+            subprocess.run(["ip", "link", "set", "wlan0", "up"], capture_output=True, timeout=5)
+            raise HTTPException(status_code=500, detail=f"Failed to set monitor mode: {e}")
+
+        # 3. Add wlan0 as Kismet source
+        source_added = False
+        try:
+            s = kismet_session()
+            r = s.post(
+                f"{KISMET_URL}/datasource/add_source.cmd",
+                json={"definition": "wlan0:name=WiFi-Capture,hop=true"},
+                timeout=10,
+            )
+            source_added = r.status_code == 200
+        except Exception as e:
+            log.warning("Could not add wlan0 to Kismet: %s", e)
+
+        detail = "WiFi capture enabled — wlan0 in monitor mode"
+        if not source_added:
+            detail += " (warning: could not add to Kismet automatically)"
+        return {"status": "ok", "active": True, "detail": detail}
+
+
 @app.post("/api/wifi/apply")
 async def apply_wifi():
     """Apply WiFi config to NetworkManager."""
@@ -222,6 +332,7 @@ async def get_status():
         "tailscale_ip": None, "hostname": None, "uptime": None,
         "device_count": 0, "active_profile": _active_profile,
         "callsign": _get_callsign(),
+        "wifi_capture": _wifi_capture_status()["active"],
     }
     try:
         r = requests.get(f"{KISMET_URL}/system/status.json", auth=(KISMET_USER, KISMET_PASS), timeout=2)

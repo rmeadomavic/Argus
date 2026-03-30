@@ -20,6 +20,20 @@
     </div>
 </div>
 
+<!-- WiFi Capture Toggle -->
+<div class="wifi-capture-bar" id="wifi-capture-bar">
+    <div class="wifi-capture-info">
+        <span class="wifi-capture-label">WiFi Capture</span>
+        <span class="wifi-capture-status" id="wifi-capture-status">Checking...</span>
+    </div>
+    <button class="wifi-capture-btn" id="wifi-capture-toggle" disabled>
+        <span class="wifi-capture-btn-text" id="wifi-capture-btn-text">Enable</span>
+    </button>
+    <div class="wifi-capture-warning" id="wifi-capture-warning" style="display:none;">
+        WiFi connectivity will be lost. LTE + Tailscale remain active.
+    </div>
+</div>
+
 <!-- Sub-Tab Navigation -->
 <div class="sub-tabs">
     <button class="sub-tab active" data-subtab="live">Live View</button>

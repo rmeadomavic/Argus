@@ -1154,6 +1154,97 @@
         }
     }
 
+    // ── WiFi Capture Toggle ────────────────────────────────
+
+    var wifiCapturePolling = false;
+
+    function updateWifiCaptureUI(data) {
+        var statusEl = document.getElementById("wifi-capture-status");
+        var btnEl = document.getElementById("wifi-capture-toggle");
+        var btnText = document.getElementById("wifi-capture-btn-text");
+        var warningEl = document.getElementById("wifi-capture-warning");
+        if (!statusEl || !btnEl) return;
+
+        btnEl.disabled = false;
+
+        if (data.active) {
+            statusEl.textContent = "CAPTURING";
+            statusEl.className = "wifi-capture-status active";
+            btnText.textContent = "Disable";
+            btnEl.className = "wifi-capture-btn capturing";
+            warningEl.style.display = "none";
+        } else {
+            statusEl.textContent = "Off — WiFi connected";
+            statusEl.className = "wifi-capture-status inactive";
+            btnText.textContent = "Enable Capture";
+            btnEl.className = "wifi-capture-btn";
+            warningEl.style.display = "none";
+        }
+    }
+
+    function pollWifiCaptureStatus() {
+        if (wifiCapturePolling) return;
+        wifiCapturePolling = true;
+        fetch("/api/wifi-capture/status", {
+            signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                wifiCapturePolling = false;
+                updateWifiCaptureUI(data);
+            })
+            .catch(function () {
+                wifiCapturePolling = false;
+            });
+    }
+
+    function initWifiCapture() {
+        var btnEl = document.getElementById("wifi-capture-toggle");
+        var warningEl = document.getElementById("wifi-capture-warning");
+        if (!btnEl) return;
+
+        // Initial status check
+        pollWifiCaptureStatus();
+
+        btnEl.addEventListener("click", function () {
+            var statusEl = document.getElementById("wifi-capture-status");
+            var isCapturing = btnEl.classList.contains("capturing");
+
+            // Show warning before enabling (not disabling)
+            if (!isCapturing && warningEl && warningEl.style.display === "none") {
+                warningEl.style.display = "";
+                btnEl.querySelector("#wifi-capture-btn-text").textContent = "Confirm Enable";
+                return;
+            }
+
+            // Do the toggle
+            btnEl.disabled = true;
+            statusEl.textContent = isCapturing ? "Restoring WiFi..." : "Switching to monitor...";
+            statusEl.className = "wifi-capture-status";
+            warningEl.style.display = "none";
+
+            fetch("/api/wifi-capture/toggle", { method: "POST" })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.status === "ok") {
+                        window.SORCC.showToast(data.detail, "success");
+                        updateWifiCaptureUI(data);
+                    } else {
+                        window.SORCC.showToast(data.detail || "Toggle failed", "error");
+                        btnEl.disabled = false;
+                    }
+                })
+                .catch(function (err) {
+                    window.SORCC.showToast("WiFi capture toggle failed: " + err, "error");
+                    btnEl.disabled = false;
+                    pollWifiCaptureStatus();
+                });
+        });
+
+        // Poll status periodically (every 15s) to stay in sync
+        setInterval(pollWifiCaptureStatus, 15000);
+    }
+
     // ── Init ────────────────────────────────────────────────
 
     document.addEventListener("DOMContentLoaded", function () {
@@ -1163,6 +1254,7 @@
         initDeviceDetail();
         initProfiles();
         initExport();
+        initWifiCapture();
 
         // Start device polling
         fetchDevices();
