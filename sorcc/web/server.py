@@ -10,6 +10,7 @@ import socket
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from sorcc.web import kismet as ks
+from sorcc.web.oui import classify_device
+
 try:
     from sorcc.config_api import (
         read_config, write_config, restore_backup, restore_factory,
@@ -29,7 +33,8 @@ try:
 except ImportError:
     _HAS_CONFIG_API = False
 
-logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+from sorcc.web.logging_config import setup_logging, ring_handler
+setup_logging()
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="SORCC RF Survey Dashboard", version="2.0.0")
@@ -53,259 +58,42 @@ class _InstructorCORSMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(_InstructorCORSMiddleware)
 
+
+class _RequestLogMiddleware(BaseHTTPMiddleware):
+    """Log every API request with method, path, status, and duration. Catch unhandled exceptions."""
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path.startswith("/static"):
+            return await call_next(request)
+        t0 = time.time()
+        try:
+            response = await call_next(request)
+            dt = (time.time() - t0) * 1000
+            lvl = logging.WARNING if response.status_code >= 400 else logging.INFO
+            log.log(lvl, f"{request.method} {request.url.path} → {response.status_code} ({dt:.0f}ms)")
+            return response
+        except Exception as exc:
+            dt = (time.time() - t0) * 1000
+            log.error(f"{request.method} {request.url.path} → 500 ({dt:.0f}ms) {type(exc).__name__}: {exc}")
+            return JSONResponse(status_code=500, content={"detail": "Internal server error", "error": str(exc)})
+
+app.add_middleware(_RequestLogMiddleware)
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    """Catch-all: return JSON instead of HTML error pages."""
+    log.error(f"Unhandled {type(exc).__name__} on {request.url.path}: {exc}")
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
-KISMET_URL = "http://localhost:2501"
-KISMET_USER = "kismet"
-KISMET_PASS = "kismet"
 _active_profile: str = "wifi-survey"
 
 
-_kismet_session_cache: requests.Session | None = None
-_kismet_session_time: float = 0
 
-def kismet_session() -> requests.Session:
-    global _kismet_session_cache, _kismet_session_time
-    # Reuse cached session for up to 60 seconds
-    if _kismet_session_cache and (time.time() - _kismet_session_time) < 60:
-        return _kismet_session_cache
-    s = requests.Session()
-    s.auth = (KISMET_USER, KISMET_PASS)
-    s.headers.update({"Accept": "application/json"})
-    try:
-        r = s.get(f"{KISMET_URL}/session/check_session", timeout=3)
-        if r.status_code == 200 and "KISMET" in r.cookies:
-            s.cookies.update(r.cookies)
-    except (requests.ConnectionError, requests.Timeout):
-        pass
-    _kismet_session_cache = s
-    _kismet_session_time = time.time()
-    return s
-
-
-# Response cache: returns stale data on Kismet timeout instead of 503
-_response_cache: dict[str, tuple[float, Any]] = {}
-_CACHE_TTL = 30  # seconds — serve cached data up to 30s old on error
-
-
-def kismet_get(endpoint, params=None, timeout=8):
-    cache_key = f"GET:{endpoint}:{params}"
-    s = kismet_session()
-    try:
-        r = s.get(f"{KISMET_URL}{endpoint}", params=params, timeout=timeout)
-        r.raise_for_status()
-        result = r.json()
-        _response_cache[cache_key] = (time.time(), result)
-        return result
-    except (requests.ConnectionError, requests.Timeout, Exception) as e:
-        # Return cached data if available
-        if cache_key in _response_cache:
-            cached_time, cached_data = _response_cache[cache_key]
-            if time.time() - cached_time < _CACHE_TTL:
-                log.warning(f"Kismet GET {endpoint} failed, returning cached data ({time.time() - cached_time:.0f}s old)")
-                return cached_data
-        if isinstance(e, requests.ConnectionError):
-            raise HTTPException(status_code=502, detail="Kismet not reachable on port 2501")
-        elif isinstance(e, requests.Timeout):
-            raise HTTPException(status_code=504, detail="Kismet request timed out")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def kismet_post(endpoint, data=None, timeout=15):
-    cache_key = f"POST:{endpoint}"
-    s = kismet_session()
-    try:
-        # Use form-encoded data (Kismet expects json= as form field, not JSON body)
-        r = s.post(f"{KISMET_URL}{endpoint}", data=data, timeout=timeout)
-        r.raise_for_status()
-        result = r.json()
-        _response_cache[cache_key] = (time.time(), result)
-        return result
-    except (requests.ConnectionError, requests.Timeout, Exception) as e:
-        if cache_key in _response_cache:
-            cached_time, cached_data = _response_cache[cache_key]
-            if time.time() - cached_time < _CACHE_TTL:
-                log.warning(f"Kismet POST {endpoint} failed, returning cached data ({time.time() - cached_time:.0f}s old)")
-                return cached_data
-        if isinstance(e, requests.ConnectionError):
-            raise HTTPException(status_code=502, detail="Kismet not reachable on port 2501")
-        elif isinstance(e, requests.Timeout):
-            raise HTTPException(status_code=504, detail="Kismet request timed out")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ── BT Manufacturer & Device Classification ─────────────────────────
-# Compact OUI table: first 3 bytes of MAC → (manufacturer, category)
-# Categories: phone, wearable, laptop, tablet, speaker, beacon, vehicle, iot, network, other
-_OUI_TABLE: dict[str, tuple[str, str]] = {
-    "00:17:C9": ("Apple", "phone"), "04:15:52": ("Apple", "phone"),
-    "04:E5:36": ("Apple", "phone"), "08:66:98": ("Apple", "phone"),
-    "0C:51:01": ("Apple", "phone"), "10:94:BB": ("Apple", "phone"),
-    "14:7D:DA": ("Apple", "phone"), "18:3E:EF": ("Apple", "phone"),
-    "1C:36:BB": ("Apple", "phone"), "20:78:F0": ("Apple", "phone"),
-    "24:A2:E1": ("Apple", "phone"), "28:6A:BA": ("Apple", "phone"),
-    "2C:BE:EB": ("Apple", "phone"), "3C:06:30": ("Apple", "phone"),
-    "40:B3:95": ("Apple", "phone"), "44:2A:60": ("Apple", "phone"),
-    "48:A9:1C": ("Apple", "phone"), "4C:57:CA": ("Apple", "phone"),
-    "54:4E:90": ("Apple", "phone"), "58:B0:35": ("Apple", "phone"),
-    "5C:97:F3": ("Apple", "phone"), "60:83:E7": ("Apple", "phone"),
-    "64:B0:A6": ("Apple", "phone"), "68:DB:F5": ("Apple", "phone"),
-    "6C:94:66": ("Apple", "phone"), "70:3E:AC": ("Apple", "phone"),
-    "78:7E:61": ("Apple", "phone"), "7C:D1:C3": ("Apple", "phone"),
-    "80:BE:05": ("Apple", "phone"), "84:FC:FE": ("Apple", "phone"),
-    "88:66:A5": ("Apple", "phone"), "8C:85:90": ("Apple", "phone"),
-    "90:8D:6C": ("Apple", "phone"), "94:E9:79": ("Apple", "phone"),
-    "98:01:A7": ("Apple", "phone"), "9C:20:7B": ("Apple", "phone"),
-    "A0:99:9B": ("Apple", "phone"), "A4:83:E7": ("Apple", "phone"),
-    "A8:5C:2C": ("Apple", "phone"), "AC:BC:32": ("Apple", "phone"),
-    "B0:19:C6": ("Apple", "phone"), "B8:53:AC": ("Apple", "phone"),
-    "BC:52:B7": ("Apple", "phone"), "C0:A5:3E": ("Apple", "phone"),
-    "C8:69:CD": ("Apple", "phone"), "CC:08:8D": ("Apple", "phone"),
-    "D0:81:7A": ("Apple", "phone"), "D4:61:9D": ("Apple", "phone"),
-    "D8:1C:79": ("Apple", "phone"), "DC:A4:CA": ("Apple", "phone"),
-    "E0:5F:45": ("Apple", "phone"), "E4:C6:3D": ("Apple", "phone"),
-    "F0:18:98": ("Apple", "phone"), "F4:5C:89": ("Apple", "phone"),
-    "F8:4D:89": ("Apple", "phone"),
-    # Samsung
-    "00:07:AB": ("Samsung", "phone"), "00:12:FB": ("Samsung", "phone"),
-    "00:1A:8A": ("Samsung", "phone"), "00:21:19": ("Samsung", "phone"),
-    "00:26:37": ("Samsung", "phone"), "08:D4:6A": ("Samsung", "phone"),
-    "10:D5:42": ("Samsung", "phone"), "14:49:E0": ("Samsung", "phone"),
-    "18:3A:2D": ("Samsung", "phone"), "1C:AF:05": ("Samsung", "phone"),
-    "24:18:1D": ("Samsung", "phone"), "28:CC:01": ("Samsung", "phone"),
-    "30:07:4D": ("Samsung", "phone"), "34:23:BA": ("Samsung", "phone"),
-    "38:01:95": ("Samsung", "phone"), "40:4E:36": ("Samsung", "phone"),
-    "44:78:3E": ("Samsung", "phone"), "4C:3C:16": ("Samsung", "phone"),
-    "50:01:BB": ("Samsung", "phone"), "54:40:AD": ("Samsung", "phone"),
-    "58:C3:8B": ("Samsung", "phone"), "64:77:91": ("Samsung", "phone"),
-    "6C:F3:73": ("Samsung", "phone"), "78:47:1D": ("Samsung", "phone"),
-    "84:25:DB": ("Samsung", "phone"), "8C:F5:A3": ("Samsung", "phone"),
-    "94:01:C2": ("Samsung", "phone"), "98:52:B1": ("Samsung", "phone"),
-    "A0:82:1F": ("Samsung", "phone"), "A8:7C:01": ("Samsung", "phone"),
-    "B4:79:C8": ("Samsung", "phone"), "BC:14:EF": ("Samsung", "phone"),
-    "C4:50:06": ("Samsung", "phone"), "CC:07:AB": ("Samsung", "phone"),
-    "D0:22:BE": ("Samsung", "phone"), "E4:7D:BD": ("Samsung", "phone"),
-    "F0:25:B7": ("Samsung", "phone"), "FC:A1:83": ("Samsung", "phone"),
-    # Google
-    "08:9E:08": ("Google", "phone"), "30:FD:38": ("Google", "speaker"),
-    "48:D6:D5": ("Google", "speaker"), "54:60:09": ("Google", "speaker"),
-    "A4:77:33": ("Google", "phone"), "F4:F5:D8": ("Google", "speaker"),
-    "F4:F5:E8": ("Google", "speaker"),
-    # Wearables
-    "B0:B2:8F": ("Fitbit", "wearable"), "C8:FF:77": ("Fitbit", "wearable"),
-    "E6:D5:7A": ("Fitbit", "wearable"),
-    "D4:22:CD": ("Garmin", "wearable"), "C8:3E:99": ("Garmin", "wearable"),
-    "EC:85:2F": ("Garmin", "wearable"),
-    # Amazon
-    "10:2C:6B": ("Amazon", "speaker"), "34:D2:70": ("Amazon", "speaker"),
-    "44:00:49": ("Amazon", "speaker"), "50:DC:E7": ("Amazon", "speaker"),
-    "68:37:E9": ("Amazon", "speaker"), "74:C2:46": ("Amazon", "speaker"),
-    "A0:02:DC": ("Amazon", "speaker"), "FC:65:DE": ("Amazon", "speaker"),
-    # Microsoft
-    "28:18:78": ("Microsoft", "laptop"), "7C:1E:52": ("Microsoft", "laptop"),
-    "C8:3D:D4": ("Microsoft", "laptop"),
-    # Intel (laptops/PCs)
-    "00:1E:64": ("Intel", "laptop"), "3C:A9:F4": ("Intel", "laptop"),
-    "60:57:18": ("Intel", "laptop"), "80:86:F2": ("Intel", "laptop"),
-    "A4:C4:94": ("Intel", "laptop"), "DC:1B:A1": ("Intel", "laptop"),
-    # Networking / Routers
-    "00:1A:2B": ("Cisco", "network"), "00:50:56": ("VMware", "network"),
-    "28:AF:42": ("ARRIS", "network"), "20:10:7A": ("ARRIS", "network"),
-    "E8:65:D4": ("Netgear", "network"), "C4:04:15": ("Netgear", "network"),
-    "10:0C:6B": ("Netgear", "network"), "A4:2B:B0": ("TP-Link", "network"),
-    "50:C7:BF": ("TP-Link", "network"), "C0:25:E9": ("TP-Link", "network"),
-    "B0:4E:26": ("TP-Link", "network"), "C8:A6:EF": ("ZTE", "phone"),
-    "00:04:3E": ("Telit", "iot"),
-    "B8:27:EB": ("Raspberry Pi", "iot"), "DC:A6:32": ("Raspberry Pi", "iot"),
-    "D8:3A:DD": ("Raspberry Pi", "iot"), "2C:CF:67": ("Raspberry Pi", "iot"),
-    # Vehicles / Automotive
-    "04:52:C7": ("Tesla", "vehicle"), "4C:FC:AA": ("Tesla", "vehicle"),
-    # Beacons / Trackers
-    "E8:59:0C": ("Tile", "beacon"), "F0:13:C3": ("Chipolo", "beacon"),
-    # Meta / Reality Labs
-    "2C:26:17": ("Meta", "wearable"),
-    # LG
-    "00:1C:62": ("LG", "phone"), "10:68:3F": ("LG", "phone"),
-    "30:76:6F": ("LG", "phone"), "64:89:9A": ("LG", "phone"),
-    "88:C9:D0": ("LG", "phone"), "BC:F5:AC": ("LG", "phone"),
-    # Xiaomi
-    "04:CF:8C": ("Xiaomi", "phone"), "28:6C:07": ("Xiaomi", "phone"),
-    "34:CE:00": ("Xiaomi", "phone"), "50:64:2B": ("Xiaomi", "iot"),
-    "64:CC:2E": ("Xiaomi", "phone"), "78:11:DC": ("Xiaomi", "phone"),
-    # Huawei / Honor
-    "00:46:4B": ("Huawei", "phone"), "04:B0:E7": ("Huawei", "phone"),
-    "20:A6:80": ("Huawei", "phone"), "48:DB:50": ("Huawei", "phone"),
-    "70:8C:B6": ("Huawei", "phone"), "CC:A2:23": ("Huawei", "phone"),
-    # Sony
-    "00:1D:BA": ("Sony", "phone"), "04:5D:4B": ("Sony", "phone"),
-    "AC:9B:0A": ("Sony", "phone"),
-    # OnePlus
-    "94:65:2D": ("OnePlus", "phone"), "C0:EE:FB": ("OnePlus", "phone"),
-    # Motorola / Lenovo
-    "00:04:0E": ("Motorola", "phone"), "9C:D3:5B": ("Motorola", "phone"),
-    "C8:14:51": ("Motorola", "phone"),
-    # Bose
-    "04:52:C7": ("Bose", "speaker"), "28:11:A5": ("Bose", "speaker"),
-    "4C:87:5D": ("Bose", "speaker"),
-    # JBL / Harman
-    "00:02:5B": ("JBL", "speaker"), "30:C0:1B": ("JBL", "speaker"),
-}
-
-_CATEGORY_ICONS = {
-    "phone": "\U0001f4f1", "wearable": "\u231a", "laptop": "\U0001f4bb",
-    "tablet": "\U0001f4f1", "speaker": "\U0001f50a", "beacon": "\U0001f4cd",
-    "vehicle": "\U0001f697", "iot": "\U0001f4e1", "network": "\U0001f5a7",
-    "other": "\U0001f4e1",
-}
-
-
-def _classify_device(mac: str, name: str, dev_type: str) -> dict[str, str]:
-    """Identify manufacturer and category from MAC OUI or device name patterns."""
-    oui = mac[:8].upper() if mac else ""
-    result: dict[str, str] = {"manufacturer": "", "category": "other", "icon": _CATEGORY_ICONS["other"]}
-
-    # OUI lookup
-    if oui in _OUI_TABLE:
-        mfr, cat = _OUI_TABLE[oui]
-        result["manufacturer"] = mfr
-        result["category"] = cat
-        result["icon"] = _CATEGORY_ICONS.get(cat, _CATEGORY_ICONS["other"])
-        return result
-
-    # Name-based heuristics
-    name_lower = (name or "").lower()
-    for keyword, (mfr, cat) in [
-        ("iphone", ("Apple", "phone")), ("ipad", ("Apple", "tablet")),
-        ("macbook", ("Apple", "laptop")), ("apple watch", ("Apple", "wearable")),
-        ("airpods", ("Apple", "wearable")), ("galaxy", ("Samsung", "phone")),
-        ("pixel", ("Google", "phone")), ("fitbit", ("Fitbit", "wearable")),
-        ("garmin", ("Garmin", "wearable")), ("tile", ("Tile", "beacon")),
-        ("echo", ("Amazon", "speaker")), ("alexa", ("Amazon", "speaker")),
-        ("surface", ("Microsoft", "laptop")), ("xbox", ("Microsoft", "other")),
-        ("bose", ("Bose", "speaker")), ("jbl", ("JBL", "speaker")),
-        ("tesla", ("Tesla", "vehicle")), ("meta quest", ("Meta", "wearable")),
-    ]:
-        if keyword in name_lower:
-            result["manufacturer"] = mfr
-            result["category"] = cat
-            result["icon"] = _CATEGORY_ICONS.get(cat, _CATEGORY_ICONS["other"])
-            return result
-
-    # BLE random address detection (bit 1 of first byte = 1 means random)
-    if mac and len(mac) >= 2:
-        try:
-            first_byte = int(mac[:2], 16)
-            if first_byte & 0x02:
-                result["manufacturer"] = "Random BLE"
-                result["category"] = "phone"
-                result["icon"] = _CATEGORY_ICONS["phone"]
-        except ValueError:
-            pass
-
-    return result
-
+# classify_device imported from sorcc.web.oui
 
 # Track first-seen times and packet history for activity metrics
 _device_first_seen: dict[str, float] = {}
@@ -328,6 +116,17 @@ def _get_callsign() -> str:
         except Exception:
             pass
     return "SORCC-01"
+
+
+@app.on_event("startup")
+async def _startup():
+    log.info("SORCC Dashboard v2.0.0 starting")
+    online, count = ks.check_online()
+    if online:
+        log.info(f"Kismet online — {count} devices tracked")
+    else:
+        log.warning("Kismet not reachable at startup")
+    log.info("Dashboard ready on http://0.0.0.0:8080")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -392,15 +191,15 @@ async def wifi_capture_toggle():
         # ── Disable capture: monitor → managed ──
         # 1. Remove wlan0 source from Kismet
         try:
-            s = kismet_session()
-            r = s.get(f"{KISMET_URL}/datasource/all_sources.json", timeout=5)
+            s = ks.session()
+            r = s.get(f"{ks.KISMET_URL}/datasource/all_sources.json", timeout=5)
             if r.status_code == 200:
                 for src in r.json() if isinstance(r.json(), list) else []:
                     iface = src.get("kismet.datasource.interface", "")
                     if "wlan0" in iface:
                         uuid = src.get("kismet.datasource.uuid")
                         if uuid:
-                            s.post(f"{KISMET_URL}/datasource/by-uuid/{uuid}/close_source.cmd", timeout=5)
+                            s.post(f"{ks.KISMET_URL}/datasource/by-uuid/{uuid}/close_source.cmd", timeout=5)
         except Exception as e:
             log.warning("Could not remove wlan0 from Kismet: %s", e)
 
@@ -463,9 +262,9 @@ async def wifi_capture_toggle():
         # 3. Add wlan0 as Kismet source
         source_added = False
         try:
-            s = kismet_session()
+            s = ks.session()
             r = s.post(
-                f"{KISMET_URL}/datasource/add_source.cmd",
+                f"{ks.KISMET_URL}/datasource/add_source.cmd",
                 json={"definition": "wlan0:name=WiFi-Capture,hop=true"},
                 timeout=10,
             )
@@ -547,7 +346,7 @@ async def get_status():
         "wifi_capture": _wifi_capture_status()["active"],
     }
     try:
-        r = requests.get(f"{KISMET_URL}/system/status.json", auth=(KISMET_USER, KISMET_PASS), timeout=2)
+        r = requests.get(f"{ks.KISMET_URL}/system/status.json", auth=(ks.KISMET_USER, ks.KISMET_PASS), timeout=2)
         if r.status_code == 200:
             status["kismet"] = True
             data = r.json()
@@ -607,7 +406,7 @@ async def get_status():
 @app.get("/api/devices")
 async def get_devices():
     try:
-        data = kismet_post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
+        data = ks.post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
             "kismet.device.base.macaddr", "kismet.device.base.name", "kismet.device.base.commonname",
             "kismet.device.base.type", "kismet.device.base.phyname",
             "kismet.device.base.signal/kismet.common.signal.last_signal",
@@ -630,7 +429,7 @@ async def get_devices():
         last_time = d.get("kismet.device.base.last_time", 0)
 
         # Manufacturer & category classification
-        classification = _classify_device(mac, name, dev_type)
+        classification = classify_device(mac, name, dev_type)
 
         # Track first-seen for "new device" detection
         if mac and mac not in _device_first_seen:
@@ -682,7 +481,7 @@ async def get_devices():
 async def get_located_devices():
     """Return devices that have GPS coordinates for map plotting."""
     try:
-        data = kismet_post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
+        data = ks.post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
             "kismet.device.base.macaddr", "kismet.device.base.name", "kismet.device.base.commonname",
             "kismet.device.base.type", "kismet.device.base.phyname",
             "kismet.device.base.signal/kismet.common.signal.last_signal",
@@ -730,7 +529,7 @@ async def get_target_rssi(query: str):
     }
     log.info(f"Hunt: query='{query}' is_mac={is_mac_query}")
     try:
-        data = kismet_post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
+        data = ks.post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
             "kismet.device.base.macaddr", "kismet.device.base.name", "kismet.device.base.commonname",
             "kismet.device.base.type",
             "kismet.device.base.signal/kismet.common.signal.last_signal",
@@ -785,7 +584,7 @@ async def get_target_rssi(query: str):
         packets = best_device.get("kismet.device.base.packets.total", 0)
         sig = best_device.get("kismet.common.signal.last_signal", best_device.get("kismet.device.base.signal/kismet.common.signal.last_signal", 0))
         name = best_device.get("kismet.device.base.commonname") or best_device.get("kismet.device.base.name", "")
-        classification = _classify_device(mac, name, best_device.get("kismet.device.base.type", ""))
+        classification = classify_device(mac, name, best_device.get("kismet.device.base.type", ""))
 
         # Packet delta for BT proximity
         prev = _last_device_snapshot.get(f"hunt_{mac}", 0)
@@ -821,8 +620,8 @@ async def get_activity():
         recent.append({
             "mac": mac,
             "seconds_ago": int(age),
-            "manufacturer": _classify_device(mac, "", "")["manufacturer"],
-            "category": _classify_device(mac, "", "")["category"],
+            "manufacturer": classify_device(mac, "", "")["manufacturer"],
+            "category": classify_device(mac, "", "")["category"],
         })
         if len(recent) >= 50:
             break
@@ -832,6 +631,13 @@ async def get_activity():
         "recent_1min": len([1 for _, t in _device_first_seen.items() if now - t < 60]),
         "feed": recent[:20],
     }
+
+
+@app.get("/api/logs")
+async def get_logs(n: int = 100, level: str | None = None):
+    """Return recent log entries from the in-memory ring buffer."""
+    entries = ring_handler.get_recent(n=min(n, 500), level=level)
+    return {"count": len(entries), "entries": entries}
 
 
 @app.get("/api/wifi-capture/status")
@@ -862,7 +668,7 @@ async def get_gps():
         pass
     if gps["lat"] is None:
         try:
-            data = kismet_get("/gps/location.json")
+            data = ks.get("/gps/location.json")
             if data and isinstance(data, dict):
                 loc = data.get("kismet.common.location.last", {})
                 gps["lat"] = loc.get("kismet.common.location.lat")
@@ -922,6 +728,135 @@ async def export_csv():
     for dev in devices:
         writer.writerow({k: dev.get(k, "") for k in fieldnames})
     return Response(content=buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=sorcc-devices.csv"})
+
+
+# ── CoT XML Export (ATAK Integration) ────────────────────────────────
+
+def _cot_type_for_category(category: str) -> str:
+    """Map device category to ATAK CoT type code."""
+    return {
+        "vehicle": "a-f-G-U-C",      # friendly ground unit combat
+        "beacon":  "a-u-G-I",         # unknown ground infrastructure
+        "network": "a-u-G-I",         # unknown ground infrastructure
+        "iot":     "a-u-G-I",         # unknown ground infrastructure
+    }.get(category, "a-u-G")          # default: unknown ground
+
+
+def _build_cot_event(device: dict, classification: dict) -> ET.Element:
+    """Build a single CoT <event> XML element for an ATAK-compatible device."""
+    mac = device.get("mac", "000000000000")
+    short_mac = mac.replace(":", "")[-6:].upper()
+    now = datetime.now(timezone.utc)
+    stale = now + timedelta(minutes=5)
+    iso_now = now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    iso_stale = stale.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    cot_type = _cot_type_for_category(classification.get("category", "other"))
+
+    event = ET.Element("event", {
+        "version": "2.0",
+        "uid": f"SORCC-{mac}",
+        "type": cot_type,
+        "time": iso_now,
+        "start": iso_now,
+        "stale": iso_stale,
+        "how": "m-g",
+    })
+
+    ET.SubElement(event, "point", {
+        "lat": str(device.get("lat", 0)),
+        "lon": str(device.get("lon", 0)),
+        "hae": "0",
+        "ce": "50",
+        "le": "50",
+    })
+
+    detail = ET.SubElement(event, "detail")
+    ET.SubElement(detail, "contact", callsign=f"SORCC-{short_mac}")
+
+    dev_type = device.get("phy", "Unknown")
+    manufacturer = classification.get("manufacturer", "Unknown")
+    packets = device.get("packets", 0)
+    signal = device.get("signal", -100)
+    remarks = ET.SubElement(detail, "remarks")
+    remarks.text = f"{dev_type} | {manufacturer} | {packets} pkts | Signal: {signal} dBm"
+
+    ET.SubElement(detail, "__group", name="Cyan", role="Team Member")
+
+    return event
+
+
+def _fetch_located_devices_for_cot() -> list[tuple[dict, dict]]:
+    """Fetch all located devices from Kismet and return (device, classification) tuples."""
+    try:
+        data = ks.post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
+            "kismet.device.base.macaddr", "kismet.device.base.name", "kismet.device.base.commonname",
+            "kismet.device.base.type", "kismet.device.base.phyname",
+            "kismet.device.base.signal/kismet.common.signal.last_signal",
+            "kismet.device.base.channel",
+            "kismet.device.base.packets.total",
+            "kismet.device.base.location/kismet.common.location.last/kismet.common.location.geopoint",
+            "dot11.device/dot11.device.last_beaconed_ssid_record/dot11.advertisedssid.ssid",
+        ]})})
+    except HTTPException:
+        return []
+
+    results: list[tuple[dict, dict]] = []
+    for d in data if isinstance(data, list) else []:
+        geopoint = d.get("kismet.device.base.location/kismet.common.location.last/kismet.common.location.geopoint")
+        if not geopoint or not isinstance(geopoint, list) or len(geopoint) < 2:
+            continue
+        lon, lat = geopoint[0], geopoint[1]
+        if lat == 0 and lon == 0:
+            continue
+        mac = d.get("kismet.device.base.macaddr", "")
+        name = d.get("kismet.device.base.commonname") or d.get("kismet.device.base.name", "")
+        dev_type = d.get("kismet.device.base.type", "")
+        classification = classify_device(mac, name, dev_type)
+        device = {
+            "mac": mac,
+            "name": name or d.get("dot11.device/dot11.device.last_beaconed_ssid_record/dot11.advertisedssid.ssid", "") or mac,
+            "phy": d.get("kismet.device.base.phyname", ""),
+            "signal": d.get("kismet.device.base.signal/kismet.common.signal.last_signal", 0),
+            "channel": d.get("kismet.device.base.channel", ""),
+            "packets": d.get("kismet.device.base.packets.total", 0),
+            "lat": lat,
+            "lon": lon,
+        }
+        results.append((device, classification))
+    return results
+
+
+@app.get("/api/cot")
+async def export_cot_all():
+    """Export CoT XML for all located devices (ATAK integration)."""
+    located = _fetch_located_devices_for_cot()
+    if not located:
+        raise HTTPException(status_code=404, detail="No devices with GPS coordinates found")
+
+    events = ET.Element("events")
+    for device, classification in located:
+        events.append(_build_cot_event(device, classification))
+
+    xml_bytes = ET.tostring(events, encoding="unicode", xml_declaration=False)
+    xml_out = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_bytes
+    return Response(content=xml_out, media_type="application/xml")
+
+
+@app.get("/api/cot/{mac}")
+async def export_cot_device(mac: str):
+    """Export CoT XML for a specific device by MAC address (ATAK integration)."""
+    mac_normalized = mac.strip().upper()
+    located = _fetch_located_devices_for_cot()
+
+    for device, classification in located:
+        if device["mac"].upper() == mac_normalized:
+            event = _build_cot_event(device, classification)
+            xml_bytes = ET.tostring(event, encoding="unicode", xml_declaration=False)
+            xml_out = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_bytes
+            return Response(content=xml_out, media_type="application/xml")
+
+    raise HTTPException(status_code=404, detail=f"Device {mac} not found or has no GPS coordinates")
 
 
 @app.get("/api/config/full")
@@ -1082,7 +1017,7 @@ def _check_kismet_config():
 
 def _check_kismet_credentials():
     try:
-        r = requests.get(f"{KISMET_URL}/session/check_session", auth=(KISMET_USER, KISMET_PASS), timeout=3)
+        r = requests.get(f"{ks.KISMET_URL}/session/check_session", auth=(ks.KISMET_USER, ks.KISMET_PASS), timeout=3)
         if r.status_code == 200: return "pass", "Credentials valid"
         return "warn", f"HTTP {r.status_code}"
     except requests.ConnectionError:
@@ -1187,21 +1122,21 @@ async def switch_profile(request: Request):
     sources = target.get("kismet_sources", {})
     errors: list[str] = []
     try:
-        s = kismet_session()
+        s = ks.session()
         try:
-            r = s.get(f"{KISMET_URL}/datasource/all_sources.json", timeout=5)
+            r = s.get(f"{ks.KISMET_URL}/datasource/all_sources.json", timeout=5)
             if r.status_code == 200:
                 sources = r.json()
                 for src in sources if isinstance(sources, list) else []:
                     uuid = src.get("kismet.datasource.uuid")
                     if uuid:
-                        try: s.post(f"{KISMET_URL}/datasource/by-uuid/{uuid}/close_source.cmd", timeout=5)
+                        try: s.post(f"{ks.KISMET_URL}/datasource/by-uuid/{uuid}/close_source.cmd", timeout=5)
                         except Exception: pass
         except Exception as e:
             errors.append(f"Could not query sources: {e}")
         for source_type, source_def in sources.items():
             if source_def:
-                try: s.post(f"{KISMET_URL}/datasource/add_source.cmd", json={"definition": source_def}, timeout=10)
+                try: s.post(f"{ks.KISMET_URL}/datasource/add_source.cmd", json={"definition": source_def}, timeout=10)
                 except Exception as e: errors.append(f"Failed to add {source_type} '{source_def}': {e}")
     except Exception as e:
         errors.append(f"Kismet reconfiguration failed: {e}")

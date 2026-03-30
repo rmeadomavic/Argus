@@ -160,12 +160,10 @@
             })
             .catch(function () {
                 consecutiveFailures++;
-                if (consecutiveFailures >= 2) {
+                if (consecutiveFailures >= 3) {
                     showConnectionBanner(false);
-                    // Grey out all status dots
-                    setDot("kismet-dot", false);
-                    setDot("gps-dot", false);
-                    setDot("modem-dot", false);
+                    // Don't grey out dots — keep last-known-good state
+                    // Only show connection banner after 3 failures (15s)
                 }
             });
     }

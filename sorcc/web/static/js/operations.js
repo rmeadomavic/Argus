@@ -104,9 +104,17 @@
             })
             .catch(function () {
                 deviceFetchInFlight = false;
-                var list = document.getElementById("device-list");
-                if (list) {
-                    list.innerHTML = '<div class="loading">Cannot reach dashboard. Check connection.</div>';
+                // Keep last-known-good data — don't blank the list
+                // Only show error if we've NEVER had data
+                if (lastDevices.length === 0) {
+                    var list = document.getElementById("device-list");
+                    if (list) {
+                        var el = document.createElement("div");
+                        el.className = "loading";
+                        el.textContent = "Connecting to Kismet...";
+                        list.textContent = "";
+                        list.appendChild(el);
+                    }
                 }
             });
     }
