@@ -231,6 +231,15 @@ ok "Base packages installed"
 
 systemctl enable --now avahi-daemon 2>/dev/null || true
 ok "Avahi mDNS daemon enabled and started"
+
+# Set WiFi regulatory domain and ensure NM manages wlan0
+WIFI_COUNTRY=$(cfg_get wifi country_code "US")
+iw reg set "$WIFI_COUNTRY" 2>/dev/null || true
+echo "REGDOMAIN=$WIFI_COUNTRY" > /etc/default/crda 2>/dev/null || true
+echo "options cfg80211 ieee80211_regdom=$WIFI_COUNTRY" > /etc/modprobe.d/wifi-regdom.conf 2>/dev/null || true
+mkdir -p /etc/NetworkManager/conf.d
+printf '[device-wifi]\nmatch-device=interface-name:wlan0\nmanaged=1\n' > /etc/NetworkManager/conf.d/sorcc-wifi.conf
+ok "WiFi regulatory domain set to $WIFI_COUNTRY, wlan0 managed by NetworkManager"
 echo ""
 
 # ══════════════════════════════════════════════════════════════
@@ -326,6 +335,9 @@ info "Generating Kismet site config from sorcc.ini..."
         echo "source=$BT_SOURCE"
     fi
     if [ -n "$WIFI_SOURCE" ]; then
+        # WARNING: Using the onboard WiFi (wlan0) for Kismet monitor mode
+        # disables all WiFi connectivity. Only set source_wifi if using an
+        # external USB WiFi adapter dedicated to monitoring.
         echo "source=$WIFI_SOURCE"
     fi
     if [ -n "$RTL433_SOURCE" ]; then
