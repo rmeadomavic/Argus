@@ -77,11 +77,14 @@
 
     // ── Status Polling ──────────────────────────────────────
 
-    function setDot(id, active) {
+    function setDot(id, state) {
+        // state: "active" (green), "warn" (amber), "error" (red)
         var dot = document.getElementById(id);
         if (!dot) return;
-        dot.classList.remove("active", "error");
-        dot.classList.add(active ? "active" : "error");
+        dot.classList.remove("active", "warn", "error");
+        if (state === true || state === "active") dot.classList.add("active");
+        else if (state === "warn") dot.classList.add("warn");
+        else dot.classList.add("error");
     }
 
     function showConnectionBanner(connected) {
@@ -108,15 +111,19 @@
 
     function updateStatus() {
         fetch("/api/status", { signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined })
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
             .then(function (s) {
                 consecutiveFailures = 0;
                 lastSuccessTime = Date.now();
                 showConnectionBanner(true);
 
-                setDot("kismet-dot", s.kismet);
-                setDot("gps-dot", s.gps);
-                setDot("modem-dot", s.modem);
+                setDot("kismet-dot", s.kismet ? "active" : "error");
+                // GPS: green=fix, amber=powered but no fix, red=not available
+                setDot("gps-dot", s.gps ? "active" : (s.gps_enabled ? "warn" : (s.modem ? "warn" : "error")));
+                setDot("modem-dot", s.modem ? "active" : "error");
 
                 // Battery display
                 var bat = document.getElementById("battery-display");

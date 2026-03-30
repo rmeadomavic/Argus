@@ -90,11 +90,11 @@
             </div>
             <div class="device-sort">
                 <select id="device-sort">
-                    <option value="signal">Signal (strongest)</option>
-                    <option value="signal-asc">Signal (weakest)</option>
-                    <option value="name">Name (A-Z)</option>
                     <option value="packets">Packets (most)</option>
                     <option value="last-seen">Last Seen (newest)</option>
+                    <option value="name">Name (A-Z)</option>
+                    <option value="signal">Signal (strongest)</option>
+                    <option value="signal-asc">Signal (weakest)</option>
                 </select>
             </div>
         </div>
@@ -242,13 +242,16 @@
 <!-- ── Hunt Mode ── -->
 <div id="subtab-hunt" class="sub-content">
     <div class="panel">
-        <h2>WiFi Target Hunt</h2>
+        <h2>Device Hunt</h2>
         <div class="hunt-setup">
-            <label for="target-ssid">Target SSID:</label>
+            <label for="target-ssid">Target (SSID or MAC address):</label>
             <div class="hunt-input-row">
-                <input type="text" id="target-ssid" placeholder="Enter target network name...">
+                <input type="text" id="target-ssid" placeholder="Enter SSID name or MAC (AA:BB:CC:DD:EE:FF)...">
                 <button id="hunt-start" class="btn-primary">Start Hunt</button>
                 <button id="hunt-stop" class="btn-danger" style="display:none;">Stop</button>
+            </div>
+            <div style="font-size:var(--font-xs);color:var(--text-dim);margin-top:4px;">
+                WiFi: enter network name &bull; Bluetooth: enter MAC address from device list &bull; Click any device row → "Hunt This Device"
             </div>
         </div>
 

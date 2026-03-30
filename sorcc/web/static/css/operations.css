@@ -336,12 +336,26 @@
     border-bottom: none;
 }
 
+.device-row.device-new {
+    background: rgba(56, 87, 35, 0.08);
+    border-left: 3px solid var(--sorcc-green-light);
+}
+
+.device-icon {
+    font-size: var(--font-sm);
+    margin-right: 2px;
+}
+
 .device-signal {
     width: 60px;
     text-align: right;
     font-weight: 700;
     font-size: var(--font-base);
     font-family: var(--font-mono);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
 }
 
 .device-signal.strong { color: var(--signal-hot); }

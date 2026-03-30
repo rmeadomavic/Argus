@@ -70,8 +70,13 @@
             if (det) det.textContent = "Checking...";
         });
 
-        fetch("/api/preflight")
-            .then(function (r) { return r.json(); })
+        fetch("/api/preflight", {
+            signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined
+        })
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
             .then(function (data) {
                 populateResults(data);
                 var ts = document.getElementById("preflight-timestamp");
@@ -81,6 +86,19 @@
             .catch(function (err) {
                 window.SORCC.showToast("Preflight check failed: " + err.message, "error");
                 if (indicator) indicator.style.display = "none";
+                // Reset stuck "Checking..." indicators to show failure
+                Object.keys(checkMapping).forEach(function (name) {
+                    var m = checkMapping[name];
+                    var el = document.getElementById(m.indicator);
+                    var det = document.getElementById(m.detail);
+                    if (el && el.textContent === "...") {
+                        el.className = "check-indicator fail";
+                        el.textContent = "?";
+                    }
+                    if (det && det.textContent === "Checking...") {
+                        det.textContent = "Connection lost";
+                    }
+                });
             });
     }
 

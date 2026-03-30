@@ -6,7 +6,7 @@
     // ── State ───────────────────────────────────────────────
     var activeSubTab = "live";
     var activeFilter = "all";
-    var activeSort = "signal";
+    var activeSort = "packets";
     var searchQuery = "";
     var lastDevices = [];
     var huntInterval = null;
@@ -89,8 +89,12 @@
         fetch("/api/devices", {
             signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined
         })
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
             .then(function (devices) {
+                if (!Array.isArray(devices)) throw new Error("Invalid response");
                 deviceFetchInFlight = false;
                 lastDevices = devices;
                 updateSignalHistory(devices);
@@ -107,22 +111,36 @@
             });
     }
 
+    // Rolling average for new/min smoothing
+    var newPerMinSamples = [];
+    var NEW_PER_MIN_WINDOW = 5; // average over 5 samples
+
     function updateStats(devices) {
-        var wifi = 0, bt = 0, other = 0, strong = 0;
+        var wifi = 0, bt = 0, other = 0, active = 0;
+        var categories = {};
         devices.forEach(function (d) {
             var phy = (d.phy || "").toLowerCase();
             if (phy.indexOf("802.11") !== -1) wifi++;
             else if (phy.indexOf("bluetooth") !== -1) bt++;
             else other++;
-            if (d.signal && d.signal !== 0 && d.signal > -50) strong++;
+            // "Active" = devices with recent packet activity (replaces "Strong >-50")
+            if (d.activity && d.activity >= 1) active++;
+            // Category breakdown
+            var cat = d.category || "other";
+            categories[cat] = (categories[cat] || 0) + 1;
         });
 
-        // New devices per minute
+        // New devices per minute — smoothed with rolling average
         var now = Date.now();
-        var elapsed = (now - lastCountTime) / 60000; // minutes
-        if (elapsed > 0.5 && devices.length !== prevDeviceCount) {
-            var diff = devices.length - prevDeviceCount;
-            newPerMinute = Math.max(0, Math.round(diff / elapsed));
+        var elapsed = (now - lastCountTime) / 60000;
+        if (elapsed > 0.25) {
+            var diff = Math.max(0, devices.length - prevDeviceCount);
+            var rate = Math.round(diff / elapsed);
+            newPerMinSamples.push(rate);
+            if (newPerMinSamples.length > NEW_PER_MIN_WINDOW) newPerMinSamples.shift();
+            var sum = 0;
+            for (var i = 0; i < newPerMinSamples.length; i++) sum += newPerMinSamples[i];
+            newPerMinute = Math.round(sum / newPerMinSamples.length);
             prevDeviceCount = devices.length;
             lastCountTime = now;
         }
@@ -131,7 +149,13 @@
         setStatValue("stat-wifi", wifi);
         setStatValue("stat-bt", bt);
         setStatValue("stat-other", other);
-        setStatValue("stat-strong", strong);
+        setStatValue("stat-strong", active);
+        // Update strong label to say "Active" instead of "Strong (>-50)"
+        var strongLabel = document.querySelector("#stat-strong")
+        if (strongLabel) {
+            var labelEl = strongLabel.parentElement && strongLabel.parentElement.querySelector(".stat-card-label");
+            if (labelEl && labelEl.textContent.indexOf("Strong") !== -1) labelEl.textContent = "Active";
+        }
         var newEl = document.getElementById("stat-new");
         if (newEl) newEl.textContent = newPerMinute > 0 ? "+" + newPerMinute : "--";
     }
@@ -282,33 +306,68 @@
             var key = d.mac || d.key || ("dev-" + (d.name || "") + "-" + (d.phy || "") + "-" + (d.channel || ""));
             deviceMap[key] = d;
 
-            var sig = d.signal || -100;
-            var pct = signalToPercent(sig);
-            var noSignal = (d.signal === 0 || d.signal === undefined || d.signal === null);
-            var cls = noSignal ? "weak" : sig > -50 ? "strong" : sig > -70 ? "medium" : "weak";
-            var barColor = noSignal ? "var(--text-secondary)" : sig > -50 ? "var(--signal-hot)" : sig > -70 ? "var(--signal-warm)" : "var(--signal-cold)";
-            var name = d.name || d.ssid || d.mac || "Unknown";
-            var meta = d.mac;
+            var sig = d.signal || 0;
+            var noSignal = (sig === 0 || sig === undefined || sig === null);
+            var packets = d.packets || 0;
+            var activity = d.activity || 0;
+            var manufacturer = d.manufacturer || "";
+            var category = d.category || "other";
+            var icon = d.icon || "";
+
+            // Display name: prefer manufacturer + type, then device name, then MAC
+            var displayName = "";
+            if (manufacturer && manufacturer !== "Random BLE") {
+                displayName = manufacturer;
+                if (d.name && d.name !== d.mac && d.name.indexOf(":") === -1) {
+                    displayName += " — " + d.name;
+                }
+            } else if (d.name && d.name !== d.mac && d.name.indexOf(":") === -1) {
+                displayName = d.name;
+            } else {
+                displayName = d.mac || "Unknown";
+            }
+
+            // Meta line: MAC + category + packets
+            var meta = d.mac || "";
+            if (category !== "other" && category !== "unknown") meta += " | " + category;
             if (d.channel) meta += " | Ch " + d.channel;
-            if (d.packets) meta += " | " + d.packets + " pkts";
+            meta += " | " + packets + " pkts";
+            if (d.is_new) meta += " | NEW";
+
+            // Activity bar instead of signal bar
+            // Map packets logarithmically: 1→5%, 10→25%, 100→50%, 1000→75%, 10000→100%
+            var pktPct = packets > 0 ? Math.min(100, Math.max(5, Math.log10(packets) * 25)) : 0;
+            var actColor = activity >= 3 ? "var(--signal-hot)" : activity >= 2 ? "var(--signal-warm)" : activity >= 1 ? "var(--sorcc-green-light)" : "var(--text-dim)";
+            var actCls = activity >= 2 ? "strong" : activity >= 1 ? "medium" : "weak";
+
+            // For WiFi devices with real signal, use signal display
+            var signalDisplay = "";
+            if (!noSignal) {
+                signalDisplay = sig + "";
+                actCls = sig > -50 ? "strong" : sig > -70 ? "medium" : "weak";
+                var sigPct = ((sig + 100) / 80) * 100;
+                pktPct = Math.max(0, Math.min(100, sigPct));
+                actColor = sig > -50 ? "var(--signal-hot)" : sig > -70 ? "var(--signal-warm)" : "var(--signal-cold)";
+            } else {
+                signalDisplay = packets > 0 ? packets + "" : "—";
+            }
 
             var sparkSvg = buildSparklineSVG(key);
 
-            html += '<div class="device-row" data-phy="' + escapeHtml(d.phy || "") + '" data-device-key="' + escapeHtml(key) + '">';
-            html += '  <div class="device-signal ' + cls + '">' + (noSignal ? "N/A" : sig) + '</div>';
+            html += '<div class="device-row' + (d.is_new ? ' device-new' : '') + '" data-phy="' + escapeHtml(d.phy || "") + '" data-device-key="' + escapeHtml(key) + '">';
+            html += '  <div class="device-signal ' + actCls + '">' + (icon ? '<span class="device-icon">' + icon + '</span>' : '') + '<span>' + escapeHtml(signalDisplay) + '</span></div>';
             html += '  <div class="device-sparkline-wrap">';
             if (sparkSvg) {
                 html += sparkSvg;
             } else {
-                // Fallback to bar when no history yet
-                html += '    <div class="device-bar-container"><div class="device-bar" style="width:' + pct + '%;background:' + barColor + '"></div></div>';
+                html += '    <div class="device-bar-container"><div class="device-bar" style="width:' + Math.round(pktPct) + '%;background:' + actColor + '"></div></div>';
             }
             html += '  </div>';
             html += '  <div class="device-info">';
-            html += '    <div class="device-name">' + escapeHtml(name) + '</div>';
+            html += '    <div class="device-name">' + escapeHtml(displayName) + '</div>';
             html += '    <div class="device-meta">' + escapeHtml(meta) + '</div>';
             html += '  </div>';
-            html += '  <div class="device-type">' + escapeHtml(d.phy || d.type || "") + '</div>';
+            html += '  <div class="device-type">' + escapeHtml(d.type || d.phy || "") + '</div>';
             html += '</div>';
         });
 
@@ -325,15 +384,15 @@
         if (!startBtn || !stopBtn || !ssidInput) return;
 
         startBtn.addEventListener("click", function () {
-            var ssid = ssidInput.value.trim();
-            if (!ssid) {
+            var query = ssidInput.value.trim();
+            if (!query) {
                 ssidInput.focus();
                 ssidInput.style.borderColor = "var(--danger)";
-                window.SORCC.showToast("Enter a target SSID to hunt", "error");
+                window.SORCC.showToast("Enter a target SSID or MAC address", "error");
                 setTimeout(function () { ssidInput.style.borderColor = ""; }, 2000);
                 return;
             }
-            startHunt(ssid);
+            startHunt(query);
         });
 
         ssidInput.addEventListener("keydown", function (e) {
@@ -475,7 +534,7 @@
 
         if (!data.found) {
             updateGaugeArc(0);
-            sigValue.textContent = "-- dBm";
+            sigValue.textContent = data.mode === "mac" ? "-- pkts" : "-- dBm";
             sigHint.textContent = "Searching...";
             sigHint.className = "signal-hint searching";
             if (status) status.textContent = "Not Found";
@@ -484,39 +543,71 @@
         }
 
         var sig = data.signal;
-        var pct = window.SORCC.signalToPercent(sig);
-        var delta = sig - prevSignal;
+        var isBtHunt = (data.mode === "mac" && (sig === 0 || sig === -100));
 
-        // Update arc gauge
-        updateGaugeArc(pct);
-        sigValue.textContent = sig + " dBm";
+        if (isBtHunt) {
+            // BT hunt: use packet activity as proximity indicator
+            var pkts = data.packets || 0;
+            var delta = data.packet_delta || 0;
+            var act = data.activity || 0;
+            // Map packet count to gauge: log scale
+            var pct = pkts > 0 ? Math.min(100, Math.log10(pkts) * 25) : 0;
+            updateGaugeArc(pct);
+            sigValue.textContent = pkts + " pkts";
 
-        // Audio feedback
-        playTone(sig);
+            // Audio based on activity
+            if (act >= 2) playTone(-40);
+            else if (act >= 1) playTone(-65);
+            else { if (audioGain) audioGain.gain.value = 0; }
 
-        // Color and hint based on signal + trend
-        if (sig > -40) {
-            sigHint.textContent = "ON TARGET";
-            sigHint.className = "signal-hint hot";
-        } else if (sig > -60) {
-            sigHint.textContent = delta > 1 ? "WARMER" : delta < -1 ? "COOLER" : "WARM";
-            sigHint.className = "signal-hint hot";
-        } else if (sig > -75) {
-            sigHint.textContent = delta > 1 ? "GETTING WARMER" : delta < -1 ? "GETTING COOLER" : "LUKEWARM";
-            sigHint.className = "signal-hint warm";
+            // Hint based on activity
+            if (act >= 3) {
+                sigHint.textContent = "HIGH ACTIVITY — CLOSE";
+                sigHint.className = "signal-hint hot";
+            } else if (act >= 2) {
+                sigHint.textContent = "ACTIVE — NEARBY";
+                sigHint.className = "signal-hint hot";
+            } else if (act >= 1) {
+                sigHint.textContent = "LOW ACTIVITY";
+                sigHint.className = "signal-hint warm";
+            } else {
+                sigHint.textContent = "IDLE — DEVICE QUIET";
+                sigHint.className = "signal-hint cold";
+            }
+
+            if (peak) peak.textContent = pkts + " total pkts";
+            // Track packet count in history chart instead of signal
+            rssiHistory.push(delta > 0 ? -40 - (3 - act) * 20 : -100);
         } else {
-            sigHint.textContent = delta > 1 ? "WARMING UP" : "COLD";
-            sigHint.className = "signal-hint cold";
+            // WiFi hunt: use signal strength as before
+            var pct = window.SORCC.signalToPercent(sig);
+            var sigDelta = sig - prevSignal;
+            updateGaugeArc(pct);
+            sigValue.textContent = sig + " dBm";
+            playTone(sig);
+
+            if (sig > -40) {
+                sigHint.textContent = "ON TARGET";
+                sigHint.className = "signal-hint hot";
+            } else if (sig > -60) {
+                sigHint.textContent = sigDelta > 1 ? "WARMER" : sigDelta < -1 ? "COOLER" : "WARM";
+                sigHint.className = "signal-hint hot";
+            } else if (sig > -75) {
+                sigHint.textContent = sigDelta > 1 ? "GETTING WARMER" : sigDelta < -1 ? "GETTING COOLER" : "LUKEWARM";
+                sigHint.className = "signal-hint warm";
+            } else {
+                sigHint.textContent = sigDelta > 1 ? "WARMING UP" : "COLD";
+                sigHint.className = "signal-hint cold";
+            }
+            if (peak) peak.textContent = (data.max_signal || sig) + " dBm";
+            rssiHistory.push(sig);
         }
 
-        // Stats
-        if (status) status.textContent = "Tracking";
+        // Common stats
+        if (status) status.textContent = "Tracking" + (data.manufacturer ? " (" + data.manufacturer + ")" : "");
         if (channel) channel.textContent = data.channel || "--";
         if (mac) mac.textContent = data.mac || "--";
-        if (peak) peak.textContent = (data.max_signal || sig) + " dBm";
 
-        // RSSI history chart
-        rssiHistory.push(sig);
         if (rssiHistory.length > MAX_HISTORY) rssiHistory.shift();
         drawRssiChart();
 
@@ -579,17 +670,17 @@
             }
         });
 
-        // "Hunt This Device" button
+        // "Hunt This Device" button — supports SSID or MAC
         var huntBtn = document.getElementById("detail-hunt-btn");
         if (huntBtn) {
             huntBtn.addEventListener("click", function () {
-                var ssid = this.dataset.ssid;
-                if (!ssid) return;
+                var query = this.dataset.query;
+                if (!query) return;
                 closeDeviceDetail();
                 // Switch to Hunt sub-tab
                 var huntTab = document.querySelector('.sub-tab[data-subtab="hunt"]');
                 if (huntTab) huntTab.click();
-                // Populate SSID and start hunt
+                // Populate query and start hunt
                 var ssidInput = document.getElementById("target-ssid");
                 if (ssidInput) {
                     ssidInput.value = ssid;
@@ -624,10 +715,11 @@
         var noSignal = (d.signal === 0 || d.signal === undefined || d.signal === null);
 
         // Populate fields
-        setText("detail-name", name);
+        var displayName = d.manufacturer ? d.manufacturer + " " + (d.category || "") : name;
+        setText("detail-name", displayName);
         setText("detail-mac", d.mac || "--");
-        setText("detail-type", d.phy || d.type || "--");
-        setText("detail-signal", noSignal ? "N/A" : d.signal + " dBm");
+        setText("detail-type", (d.manufacturer || "") + (d.manufacturer ? " · " : "") + (d.phy || d.type || "--"));
+        setText("detail-signal", noSignal ? (d.packets ? d.packets + " pkts" : "N/A") : d.signal + " dBm");
         setText("detail-channel", d.channel || "--");
         setText("detail-packets", d.packets != null ? d.packets.toLocaleString() : "--");
         setText("detail-last-seen", d.last_seen ? formatTimestamp(d.last_seen) : "--");
@@ -635,10 +727,12 @@
         // Store data on action buttons for handlers
         var huntBtn = document.getElementById("detail-hunt-btn");
         if (huntBtn) {
-            var ssid = d.ssid || d.name || "";
-            huntBtn.dataset.ssid = ssid;
-            huntBtn.disabled = !ssid;
-            huntBtn.textContent = ssid ? "Hunt This Device" : "No SSID Available";
+            // For WiFi: hunt by SSID. For BT: hunt by MAC address.
+            var isBt = (d.phy || "").toLowerCase().indexOf("bluetooth") !== -1;
+            var huntQuery = isBt ? d.mac : (d.ssid || d.name || d.mac || "");
+            huntBtn.dataset.query = huntQuery;
+            huntBtn.disabled = !huntQuery;
+            huntBtn.textContent = huntQuery ? "Hunt This Device" : "Cannot Hunt";
         }
 
         var locateBtn = document.getElementById("detail-locate-btn");
