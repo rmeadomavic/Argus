@@ -37,6 +37,10 @@
                 var panel = document.getElementById("subtab-" + target);
                 if (panel) panel.classList.add("active");
                 activeSubTab = target;
+                // Immediately render spectrum with cached data when switching to tab
+                if (target === "spectrum" && lastDevices.length > 0) {
+                    renderSpectrum(lastDevices);
+                }
             });
         });
     }
