@@ -170,10 +170,11 @@
         var points = [];
         var lastValid = null;
 
+        var denom = Math.max(history.length - 1, 1);
         for (var i = 0; i < history.length; i++) {
             var val = history[i];
             if (val === null) continue;
-            var x = (i / (SPARKLINE_MAX - 1)) * w;
+            var x = (i / denom) * w;
             var y = h - ((val - minDbm) / range) * h;
             y = Math.max(1, Math.min(h - 1, y));
             points.push(Math.round(x * 10) / 10 + "," + Math.round(y * 10) / 10);
@@ -223,13 +224,13 @@
         filtered = filtered.slice().sort(function (a, b) {
             switch (activeSort) {
                 case "signal":
-                    // Put 0 (unknown) at the bottom
-                    var sa = a.signal === 0 ? -999 : a.signal;
-                    var sb = b.signal === 0 ? -999 : b.signal;
+                    // Put 0/null/undefined (unknown) at the bottom
+                    var sa = (a.signal === 0 || a.signal == null) ? -999 : a.signal;
+                    var sb = (b.signal === 0 || b.signal == null) ? -999 : b.signal;
                     return sb - sa;
                 case "signal-asc":
-                    var sa2 = a.signal === 0 ? 1 : a.signal;
-                    var sb2 = b.signal === 0 ? 1 : b.signal;
+                    var sa2 = (a.signal === 0 || a.signal == null) ? 1 : a.signal;
+                    var sb2 = (b.signal === 0 || b.signal == null) ? 1 : b.signal;
                     return sa2 - sb2;
                 case "name":
                     return (a.name || a.mac || "").localeCompare(b.name || b.mac || "");
@@ -254,7 +255,7 @@
 
         var html = "";
         filtered.forEach(function (d) {
-            var key = d.mac || d.key || ("dev-" + Math.random());
+            var key = d.mac || d.key || ("dev-" + (d.name || "") + "-" + (d.phy || "") + "-" + (d.channel || ""));
             deviceMap[key] = d;
 
             var sig = d.signal || -100;
@@ -269,7 +270,7 @@
 
             var sparkSvg = buildSparklineSVG(key);
 
-            html += '<div class="device-row" data-phy="' + (d.phy || "") + '" data-device-key="' + escapeHtml(key) + '">';
+            html += '<div class="device-row" data-phy="' + escapeHtml(d.phy || "") + '" data-device-key="' + escapeHtml(key) + '">';
             html += '  <div class="device-signal ' + cls + '">' + (noSignal ? "N/A" : sig) + '</div>';
             html += '  <div class="device-sparkline-wrap">';
             if (sparkSvg) {

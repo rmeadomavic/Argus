@@ -71,7 +71,7 @@ def kismet_session() -> requests.Session:
         r = s.get(f"{KISMET_URL}/session/check_session", timeout=3)
         if r.status_code == 200 and "KISMET" in r.cookies:
             s.cookies.update(r.cookies)
-    except requests.ConnectionError:
+    except (requests.ConnectionError, requests.Timeout):
         pass
     return s
 
@@ -428,7 +428,10 @@ async def config_factory_reset():
 async def config_export():
     if not _HAS_CONFIG_API:
         raise HTTPException(status_code=501, detail="Config API module not available")
-    cfg = read_config()
+    try:
+        cfg = read_config()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read config: {e}")
     content = json.dumps(cfg, indent=2)
     return Response(content=content, media_type="application/json", headers={"Content-Disposition": "attachment; filename=sorcc-config.json"})
 
