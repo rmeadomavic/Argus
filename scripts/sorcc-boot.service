@@ -18,6 +18,8 @@ ExecStart=/bin/bash -c 'CON=$(nmcli -t -f NAME con show 2>/dev/null | grep -i so
 ExecStart=/usr/bin/python3 /opt/sorcc/gps_lte.py
 # Start mDNS for device discovery on the local network
 ExecStartPost=/usr/bin/systemctl start avahi-daemon
+# Ensure Tailscale SSH stays enabled across reboots
+ExecStartPost=-/usr/bin/tailscale set --ssh
 
 [Install]
 WantedBy=multi-user.target
