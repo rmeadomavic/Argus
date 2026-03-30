@@ -157,6 +157,64 @@ async def restart_lte():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/wifi/apply")
+async def apply_wifi():
+    """Apply WiFi config to NetworkManager."""
+    if not _HAS_CONFIG_API:
+        raise HTTPException(status_code=500, detail="Config API not available")
+    try:
+        cfg = read_config()
+        ssid = cfg.get("wifi", {}).get("ssid", "").strip()
+        password = cfg.get("wifi", {}).get("password", "").strip()
+        country = cfg.get("wifi", {}).get("country_code", "US").strip()
+        if not ssid:
+            return {"status": "ok", "detail": "No SSID configured — WiFi auto-connect disabled"}
+
+        # Set regulatory domain
+        subprocess.run(["iw", "reg", "set", country], capture_output=True, timeout=5)
+
+        # Check if connection already exists
+        check = subprocess.run(
+            ["nmcli", "-t", "-f", "NAME", "connection", "show"],
+            capture_output=True, text=True, timeout=5
+        )
+        conn_exists = ssid in check.stdout.splitlines()
+
+        if conn_exists:
+            # Update existing connection
+            result = subprocess.run(
+                ["nmcli", "connection", "modify", ssid,
+                 "wifi-sec.psk", password,
+                 "connection.autoconnect", "yes",
+                 "connection.autoconnect-priority", "100"],
+                capture_output=True, text=True, timeout=10
+            )
+        else:
+            # Create new connection
+            result = subprocess.run(
+                ["nmcli", "connection", "add",
+                 "type", "wifi",
+                 "con-name", ssid,
+                 "ssid", ssid,
+                 "wifi-sec.key-mgmt", "wpa-psk",
+                 "wifi-sec.psk", password,
+                 "connection.autoconnect", "yes",
+                 "connection.autoconnect-priority", "100"],
+                capture_output=True, text=True, timeout=10
+            )
+
+        if result.returncode == 0:
+            action = "updated" if conn_exists else "created"
+            return {"status": "ok", "detail": f"WiFi connection '{ssid}' {action}"}
+        return {"status": "error", "detail": result.stderr.strip() or "nmcli command failed"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="nmcli not found — NetworkManager not installed")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="WiFi configuration timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/status")
 async def get_status():
     status: dict[str, Any] = {
@@ -521,9 +579,39 @@ def _check_tailscale():
     return "warn", "Tailscale not connected"
 
 def _check_wifi():
-    result = subprocess.run(["ip", "link", "show", "wlan0"], capture_output=True, text=True, timeout=5)
-    if result.returncode == 0: return "pass", "wlan0 interface present"
-    return "warn", "wlan0 not found"
+    iface = "wlan0"
+    if _HAS_CONFIG_API:
+        try:
+            cfg = read_config()
+            iface = cfg.get("kismet", {}).get("source_wifi", "") or "wlan0"
+            # Strip any Kismet source options (e.g. "wlan0:hop=true" -> "wlan0")
+            iface = iface.split(":")[0]
+        except Exception:
+            pass
+    result = subprocess.run(["ip", "link", "show", iface], capture_output=True, text=True, timeout=5)
+    if result.returncode == 0: return "pass", f"{iface} interface present"
+    return "warn", f"{iface} not found"
+
+def _check_wifi_conflict():
+    if not _HAS_CONFIG_API:
+        return "skip", "Config API not available"
+    try:
+        cfg = read_config()
+        monitor_iface = cfg.get("kismet", {}).get("source_wifi", "").split(":")[0].strip()
+        connect_ssid = cfg.get("wifi", {}).get("ssid", "").strip()
+        if not monitor_iface or not connect_ssid:
+            return "pass", "No conflict (one or both WiFi uses unconfigured)"
+        # Check if the monitor interface is the same one NetworkManager would use for auto-connect
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "DEVICE", "connection", "show", "--active"],
+            capture_output=True, text=True, timeout=5
+        )
+        active_devices = result.stdout.strip().splitlines()
+        if monitor_iface in active_devices:
+            return "warn", f"{monitor_iface} is used for both Kismet monitor and WiFi — use a second adapter"
+        return "pass", f"Monitor ({monitor_iface}) and WiFi auto-connect on separate adapters"
+    except Exception as e:
+        return "warn", f"Could not check adapter conflict: {e}"
 
 def _check_kismet_config():
     for p in [Path("/etc/kismet/kismet_site.conf"), Path("/usr/local/etc/kismet/kismet_site.conf")]:
@@ -598,6 +686,7 @@ async def preflight():
         _run_check("Internet", "network", _check_internet),
         _run_check("Tailscale", "network", _check_tailscale),
         _run_check("WiFi (wlan0)", "network", _check_wifi),
+        _run_check("WiFi Adapter Conflict", "network", _check_wifi_conflict),
         _run_check("GPS Fix", "network", _check_gps_fix),
         _run_check("Kismet Config", "config", _check_kismet_config),
         _run_check("Kismet Credentials", "config", _check_kismet_credentials),

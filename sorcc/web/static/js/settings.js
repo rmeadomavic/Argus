@@ -53,6 +53,7 @@
             "cfg-dash-port":      { section: "dashboard", key: "port" },
             "cfg-wifi-ssid":      { section: "wifi", key: "ssid" },
             "cfg-wifi-pass":      { section: "wifi", key: "password" },
+            "cfg-wifi-country":   { section: "wifi", key: "country_code" },
             "cfg-ts-enabled":     { section: "tailscale", key: "enabled" },
             "cfg-pisugar-enabled": { section: "pisugar", key: "enabled" },
         };
@@ -91,6 +92,7 @@
             "cfg-dash-port":      { section: "dashboard", key: "port" },
             "cfg-wifi-ssid":      { section: "wifi", key: "ssid" },
             "cfg-wifi-pass":      { section: "wifi", key: "password" },
+            "cfg-wifi-country":   { section: "wifi", key: "country_code" },
             "cfg-ts-enabled":     { section: "tailscale", key: "enabled" },
             "cfg-pisugar-enabled": { section: "pisugar", key: "enabled" },
         };
@@ -151,6 +153,21 @@
             });
     }
 
+    function applyWifi() {
+        fetch("/api/wifi/apply", { method: "POST" })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.status === "ok") {
+                    window.SORCC.showToast(data.detail, "success");
+                } else {
+                    window.SORCC.showToast(data.detail || "WiFi apply failed", "error");
+                }
+            })
+            .catch(function (err) {
+                window.SORCC.showToast("WiFi apply failed: " + err.message, "error");
+            });
+    }
+
     function restartLte() {
         fetch("/api/lte/restart", { method: "POST" })
             .then(function (r) {
@@ -208,6 +225,12 @@
 
         var lteBtn = document.getElementById("btn-restart-lte");
         if (lteBtn) lteBtn.addEventListener("click", restartLte);
+
+        var wifiBtn = document.getElementById("btn-apply-wifi");
+        if (wifiBtn) wifiBtn.addEventListener("click", function () {
+            applyConfig();
+            setTimeout(applyWifi, 500);
+        });
 
         // Load config when settings tab is activated
         document.querySelectorAll(".tab").forEach(function (tab) {

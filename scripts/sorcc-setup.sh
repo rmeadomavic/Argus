@@ -2,8 +2,17 @@
 # SORCC-PI — One-script Raspberry Pi payload setup
 # Installs everything needed for the SORCC RF Survey payload.
 #
-# Usage: sudo bash scripts/sorcc-setup.sh
+# Usage: sudo bash scripts/sorcc-setup.sh [--skip-upgrade]
 set -euo pipefail
+
+# ── Parse command-line flags ────────────────────────────────
+SKIP_UPGRADE=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-upgrade) SKIP_UPGRADE=true; shift ;;
+        *) echo "Unknown option: $1"; echo "Usage: sorcc-setup.sh [--skip-upgrade]"; exit 1 ;;
+    esac
+done
 
 # ── Helpers ──────────────────────────────────────────────────
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -15,6 +24,11 @@ info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 ask() {
     local prompt="$1" default="${2:-Y}"
     local yn
+    # Non-interactive mode: use the default answer
+    if [ ! -t 0 ]; then
+        [[ "$default" == "Y" ]]
+        return
+    fi
     if [[ "$default" == "Y" ]]; then
         read -rp "$prompt [Y/n]: " yn
         yn="${yn:-Y}"
@@ -192,7 +206,11 @@ info "Step 2/8: System update & base packages"
 echo ""
 
 apt-get update -y
-apt-get upgrade -y
+if [ "$SKIP_UPGRADE" = true ]; then
+    info "Skipping apt-get upgrade (--skip-upgrade flag set)"
+else
+    apt-get upgrade -y
+fi
 apt-get install -y \
     build-essential \
     cmake \
@@ -210,6 +228,9 @@ apt-get install -y \
     network-manager \
     modemmanager
 ok "Base packages installed"
+
+systemctl enable --now avahi-daemon 2>/dev/null || true
+ok "Avahi mDNS daemon enabled and started"
 echo ""
 
 # ══════════════════════════════════════════════════════════════
@@ -353,20 +374,27 @@ if [ -n "$MODEM_NUM" ]; then
         APN=$(cfg_get lte apn "")
 
         if [ -z "$APN" ]; then
-            echo ""
-            echo "  Common APNs by carrier:"
-            echo "    T-Mobile:  b2b.static"
-            echo "    AT&T:      broadband"
-            echo "    Verizon:   vzwinternet"
-            echo "    FirstNet:  firstnet"
-            echo ""
-            read -rp "  Enter APN for your SIM card (or leave blank for auto-detect): " APN_INPUT
-            APN="${APN_INPUT:-}"
+            if [ -t 0 ]; then
+                # Interactive — prompt user
+                echo ""
+                echo "  Common APNs by carrier:"
+                echo "    T-Mobile:  b2b.static"
+                echo "    AT&T:      broadband"
+                echo "    Verizon:   vzwinternet"
+                echo "    FirstNet:  firstnet"
+                echo ""
+                read -rp "  Enter APN for your SIM card (or leave blank for auto-detect): " APN_INPUT
+                APN="${APN_INPUT:-}"
 
-            # Save APN to config for future reference
-            if [ -n "$APN" ]; then
-                cfg_set lte apn "$APN"
-                info "APN '$APN' saved to config"
+                # Save APN to config for future reference
+                if [ -n "$APN" ]; then
+                    cfg_set lte apn "$APN"
+                    info "APN '$APN' saved to config"
+                fi
+            else
+                # Non-interactive — use auto-detect
+                info "Non-interactive mode: using APN auto-detect"
+                APN=""
             fi
         else
             info "Using APN from config: $APN"
@@ -451,20 +479,41 @@ else
     info "Tailscale disabled in config — skipping"
 fi
 
-# PiSugar
+# PiSugar (optional — wrapped in subshell so failure doesn't kill the install)
 PISUGAR_ENABLED=$(cfg_get pisugar enabled "true")
 if [ "$PISUGAR_ENABLED" = "true" ]; then
     if systemctl is-active --quiet pisugar-server 2>/dev/null; then
         ok "PiSugar server already running"
     else
         if ask "Install PiSugar power manager?" "Y"; then
-            info "Downloading PiSugar installer..."
-            curl -fsSL https://cdn.pisugar.com/release/pisugar-power-manager.sh -o /tmp/pisugar-install.sh
-            bash /tmp/pisugar-install.sh -c release
-            systemctl enable pisugar-server 2>/dev/null || true
-            systemctl start pisugar-server 2>/dev/null || true
-            rm -f /tmp/pisugar-install.sh
-            ok "PiSugar power manager installed and running"
+            (
+                # Create raspi-config stub if missing (Kali doesn't ship it;
+                # pisugar-poweroff postinst expects it)
+                if ! command -v raspi-config >/dev/null 2>&1; then
+                    info "Creating raspi-config stub for PiSugar compatibility"
+                    cat > /usr/local/bin/raspi-config << 'STUB'
+#!/bin/bash
+# Stub for Kali Linux — PiSugar postinst expects this
+exit 0
+STUB
+                    chmod +x /usr/local/bin/raspi-config
+                fi
+
+                # Pre-seed PiSugar model selection to avoid whiptail dialog
+                echo "pisugar-server pisugar-server/model select PiSugar 2 (2-LEDs)" | debconf-set-selections 2>/dev/null || true
+                export DEBIAN_FRONTEND=noninteractive
+
+                info "Downloading PiSugar installer..."
+                curl -fsSL https://cdn.pisugar.com/release/pisugar-power-manager.sh -o /tmp/pisugar-install.sh
+                bash /tmp/pisugar-install.sh -c release
+
+                unset DEBIAN_FRONTEND
+
+                systemctl enable pisugar-server 2>/dev/null || true
+                systemctl start pisugar-server 2>/dev/null || true
+                rm -f /tmp/pisugar-install.sh
+                ok "PiSugar power manager installed and running"
+            ) || warn "PiSugar install failed — skipping (not critical)"
         else
             info "Skipping PiSugar setup."
         fi
@@ -481,25 +530,27 @@ echo ""
 info "Step 7/8: Boot services & headless setup"
 echo ""
 
-# Cellular recon tools (optional)
+# Cellular recon tools (optional — wrapped so failure doesn't kill the install)
 RECON_ENABLED=$(cfg_get recon_tools enabled "true")
 if [ "$RECON_ENABLED" = "true" ]; then
     if ask "Install cellular recon tools (gr-gsm, kalibrate, GQRX, IMSI-catcher)?" "Y"; then
-        apt-get install -y gr-gsm kalibrate-rtl 2>/dev/null || {
-            warn "gr-gsm/kalibrate-rtl not available — may need manual install"
-        }
-        apt-get install -y gqrx-sdr 2>/dev/null || {
-            warn "gqrx-sdr not available"
-        }
+        (
+            apt-get install -y gr-gsm kalibrate-rtl 2>/dev/null || {
+                warn "gr-gsm/kalibrate-rtl not available — may need manual install"
+            }
+            apt-get install -y gqrx-sdr 2>/dev/null || {
+                warn "gqrx-sdr not available"
+            }
 
-        IMSI_DIR="$SORCC_HOME/IMSI-catcher"
-        if [ -d "$IMSI_DIR" ]; then
-            ok "IMSI-catcher already cloned at $IMSI_DIR"
-        else
-            git clone https://github.com/Oros42/IMSI-catcher.git "$IMSI_DIR"
-            chown -R "$SORCC_USER:$SORCC_USER" "$IMSI_DIR"
-            ok "IMSI-catcher cloned to $IMSI_DIR"
-        fi
+            IMSI_DIR="$SORCC_HOME/IMSI-catcher"
+            if [ -d "$IMSI_DIR" ]; then
+                ok "IMSI-catcher already cloned at $IMSI_DIR"
+            else
+                git clone https://github.com/Oros42/IMSI-catcher.git "$IMSI_DIR"
+                chown -R "$SORCC_USER:$SORCC_USER" "$IMSI_DIR"
+                ok "IMSI-catcher cloned to $IMSI_DIR"
+            fi
+        ) || warn "Recon tools install failed — skipping (not critical)"
     fi
 fi
 
