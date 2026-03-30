@@ -404,17 +404,29 @@ async def wifi_capture_toggle():
         except Exception as e:
             log.warning("Could not remove wlan0 from Kismet: %s", e)
 
-        # 2. Restore managed mode
+        # 2. Restore managed mode — brcmfmac needs full driver reload after monitor mode
         try:
-            subprocess.run(["ip", "link", "set", "wlan0", "down"], timeout=5, check=True)
-            subprocess.run(["iw", "dev", "wlan0", "set", "type", "managed"], timeout=5, check=True)
-            subprocess.run(["ip", "link", "set", "wlan0", "up"], timeout=5, check=True)
-        except subprocess.CalledProcessError as e:
+            subprocess.run(["ip", "link", "set", "wlan0", "down"], timeout=5)
+            subprocess.run(["modprobe", "-r", "brcmfmac"], timeout=10)
+            time.sleep(2)
+            subprocess.run(["modprobe", "brcmfmac"], timeout=10)
+            # Wait for wlan0 to reappear after driver reload
+            for _ in range(10):
+                r = subprocess.run(["ip", "link", "show", "wlan0"], capture_output=True, timeout=5)
+                if r.returncode == 0:
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError("wlan0 did not reappear after driver reload")
+        except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to restore managed mode: {e}")
 
-        # 3. Reconnect WiFi via NetworkManager
+        # 3. Reconnect WiFi via NetworkManager — wait for NM to detect the interface, then connect
         try:
             subprocess.run(["nmcli", "device", "set", "wlan0", "managed", "yes"], timeout=5)
+            time.sleep(3)  # Let NM scan for networks
+            subprocess.run(["nmcli", "device", "wifi", "rescan"], capture_output=True, timeout=5)
+            time.sleep(4)  # Wait for scan results
             # Find first WiFi connection profile and activate it
             r = subprocess.run(
                 ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
@@ -423,7 +435,7 @@ async def wifi_capture_toggle():
             for line in r.stdout.strip().splitlines():
                 parts = line.split(":")
                 if len(parts) >= 2 and parts[-1] == "802-11-wireless":
-                    subprocess.run(["nmcli", "connection", "up", parts[0]], capture_output=True, timeout=10)
+                    subprocess.run(["nmcli", "connection", "up", parts[0]], capture_output=True, timeout=15)
                     break
         except Exception as e:
             log.warning("WiFi reconnect failed (LTE still available): %s", e)
