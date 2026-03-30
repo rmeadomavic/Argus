@@ -24,6 +24,7 @@
 <div class="sub-tabs">
     <button class="sub-tab active" data-subtab="live">Live View</button>
     <button class="sub-tab" data-subtab="map">Map</button>
+    <button class="sub-tab" data-subtab="spectrum">Spectrum</button>
     <button class="sub-tab" data-subtab="hunt">Hunt Mode</button>
     <button class="sub-tab" data-subtab="export">Export</button>
 </div>
@@ -159,6 +160,69 @@
             <span class="legend-item"><span class="legend-dot" style="background:#385723"></span> Your Position</span>
         </div>
     </div>
+</div>
+
+<!-- ── Spectrum View ── -->
+<div id="subtab-spectrum" class="sub-content">
+    <div class="spectrum-grid">
+        <!-- Channel Utilization Chart -->
+        <div class="spectrum-card spectrum-card-wide">
+            <div class="spectrum-card-header">
+                <h3>Channel Utilization</h3>
+                <span class="spectrum-card-badge" id="spec-ch-count">0 channels</span>
+            </div>
+            <div class="spectrum-chart-wrap">
+                <svg id="channel-chart" class="spectrum-svg" viewBox="0 0 720 220" preserveAspectRatio="xMidYMid meet">
+                    <!-- Grid rendered by JS -->
+                </svg>
+            </div>
+            <div class="spectrum-chart-legend">
+                <span class="spec-legend-item"><span class="spec-legend-swatch" style="background:var(--signal-cold)"></span> &lt;3 devices</span>
+                <span class="spec-legend-item"><span class="spec-legend-swatch" style="background:var(--signal-warm)"></span> 3-8 devices</span>
+                <span class="spec-legend-item"><span class="spec-legend-swatch" style="background:var(--signal-hot)"></span> &gt;8 devices</span>
+            </div>
+        </div>
+
+        <!-- Frequency Band Distribution -->
+        <div class="spectrum-card">
+            <div class="spectrum-card-header">
+                <h3>Band Distribution</h3>
+            </div>
+            <div class="spectrum-donut-wrap">
+                <svg id="band-donut" class="spectrum-svg" viewBox="0 0 240 240">
+                    <!-- Donut rendered by JS -->
+                </svg>
+                <div class="donut-center-text">
+                    <div class="donut-center-value" id="donut-total">0</div>
+                    <div class="donut-center-label">DEVICES</div>
+                </div>
+            </div>
+            <div class="band-list" id="band-list">
+                <!-- Band breakdown rendered by JS -->
+            </div>
+        </div>
+
+        <!-- Signal Heatmap Grid -->
+        <div class="spectrum-card">
+            <div class="spectrum-card-header">
+                <h3>Signal Heatmap</h3>
+                <span class="spectrum-card-badge" id="spec-heatmap-info">Channel vs Signal</span>
+            </div>
+            <div class="spectrum-chart-wrap">
+                <svg id="signal-heatmap" class="spectrum-svg" viewBox="0 0 400 200">
+                    <!-- Heatmap rendered by JS -->
+                </svg>
+            </div>
+            <div class="heatmap-scale">
+                <span class="heatmap-scale-label">Empty</span>
+                <div class="heatmap-scale-bar"></div>
+                <span class="heatmap-scale-label">Crowded</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scan line effect overlay -->
+    <div class="spectrum-scanline"></div>
 </div>
 
 <!-- ── Hunt Mode ── -->

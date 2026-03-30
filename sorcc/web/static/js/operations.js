@@ -76,7 +76,7 @@
 
     function fetchDevices() {
         if (window.SORCC.getActiveTab() !== "operations") return;
-        if (activeSubTab !== "live") return;
+        if (activeSubTab !== "live" && activeSubTab !== "spectrum") return;
 
         fetch("/api/devices")
             .then(function (r) { return r.json(); })
@@ -85,6 +85,7 @@
                 updateSignalHistory(devices);
                 renderDevices(devices);
                 updateStats(devices);
+                renderSpectrum(devices);
             })
             .catch(function () {
                 var list = document.getElementById("device-list");
@@ -615,6 +616,312 @@
         if (diff < 60) return diff + "s ago";
         if (diff < 3600) return Math.floor(diff / 60) + "m ago";
         return d.toLocaleTimeString();
+    }
+
+    // ── Spectrum Visualization ────────────────────────────
+
+    // WiFi channel → center frequency (MHz) mapping
+    var WIFI_CHANNELS_24 = {1:2412,2:2417,3:2422,4:2427,5:2432,6:2437,7:2442,8:2447,9:2452,10:2457,11:2462,12:2467,13:2472,14:2484};
+    var WIFI_CHANNELS_5 = {36:5180,40:5200,44:5220,48:5240,52:5260,56:5280,60:5300,64:5320,100:5500,104:5520,108:5540,112:5560,116:5580,120:5600,124:5620,128:5640,132:5660,136:5680,140:5700,144:5720,149:5745,153:5765,157:5785,161:5805,165:5825};
+
+    var BAND_DEFS = [
+        { id: "2.4ghz", label: "2.4 GHz WiFi", color: "#4ade80", min: 2400, max: 2500 },
+        { id: "5ghz",   label: "5 GHz WiFi",   color: "#42a5f5", min: 5150, max: 5850 },
+        { id: "bt",     label: "Bluetooth",     color: "#a78bfa", min: 2402, max: 2480, phyMatch: "bluetooth" },
+        { id: "433mhz", label: "433 MHz ISM",   color: "#f59e0b", min: 430, max: 440 },
+        { id: "adsb",   label: "1090 ADS-B",    color: "#ef5350", min: 1088, max: 1092 },
+        { id: "other",  label: "Other",         color: "#6b7280", min: 0, max: 0 }
+    ];
+
+    function classifyBand(device) {
+        var phy = (device.phy || "").toLowerCase();
+        // BT devices: classify by phy name since frequency may not be set
+        if (phy.indexOf("bluetooth") !== -1) return "bt";
+        var freq = device.frequency || 0;
+        if (freq === 0) {
+            // Try to infer from channel string
+            var ch = parseInt(device.channel, 10);
+            if (!isNaN(ch)) {
+                if (WIFI_CHANNELS_24[ch]) freq = WIFI_CHANNELS_24[ch];
+                else if (WIFI_CHANNELS_5[ch]) freq = WIFI_CHANNELS_5[ch];
+            }
+        }
+        // Kismet reports frequency in kHz (2412000 = 2412 MHz)
+        var mhz = freq > 100000 ? freq / 1000 : freq;
+        if (mhz >= 2400 && mhz <= 2500) return "2.4ghz";
+        if (mhz >= 5150 && mhz <= 5850) return "5ghz";
+        if (mhz >= 430 && mhz <= 440) return "433mhz";
+        if (mhz >= 1088 && mhz <= 1092) return "adsb";
+        if (mhz > 0) return "other";
+        // Last resort: classify by phy type
+        if (phy.indexOf("802.11") !== -1) return "2.4ghz";
+        if (phy.indexOf("rtl433") !== -1) return "433mhz";
+        if (phy.indexOf("adsb") !== -1) return "adsb";
+        return "other";
+    }
+
+    function renderSpectrum(devices) {
+        if (activeSubTab !== "spectrum") return;
+        renderChannelChart(devices);
+        renderBandDonut(devices);
+        renderSignalHeatmap(devices);
+    }
+
+    // ── Channel Utilization Bar Chart ──
+
+    function renderChannelChart(devices) {
+        var svg = document.getElementById("channel-chart");
+        if (!svg) return;
+
+        // Count devices per channel (WiFi only)
+        var channelCounts = {};
+        var channelSignals = {};
+        devices.forEach(function (d) {
+            var ch = d.channel;
+            if (!ch) return;
+            var phy = (d.phy || "").toLowerCase();
+            if (phy.indexOf("802.11") === -1) return;
+            if (!channelCounts[ch]) { channelCounts[ch] = 0; channelSignals[ch] = []; }
+            channelCounts[ch]++;
+            if (d.signal && d.signal !== 0) channelSignals[ch].push(d.signal);
+        });
+
+        // Sort channels numerically
+        var channels = Object.keys(channelCounts).sort(function (a, b) {
+            return parseInt(a, 10) - parseInt(b, 10);
+        });
+
+        var badge = document.getElementById("spec-ch-count");
+        if (badge) badge.textContent = channels.length + " channels";
+
+        if (channels.length === 0) {
+            svg.innerHTML = '<text x="360" y="110" text-anchor="middle" fill="var(--text-dim)" font-size="14" font-family="var(--font-mono)">No WiFi channels detected</text>';
+            return;
+        }
+
+        var maxCount = Math.max.apply(null, channels.map(function (ch) { return channelCounts[ch]; }));
+        if (maxCount === 0) maxCount = 1;
+
+        var W = 720, H = 220;
+        var padL = 40, padR = 10, padT = 10, padB = 30;
+        var chartW = W - padL - padR;
+        var chartH = H - padT - padB;
+        var barW = Math.min(32, Math.floor(chartW / channels.length) - 4);
+        var gap = (chartW - barW * channels.length) / (channels.length + 1);
+
+        var html = '';
+        // Grid lines
+        for (var g = 0; g <= 4; g++) {
+            var gy = padT + (g / 4) * chartH;
+            var gVal = Math.round(maxCount * (1 - g / 4));
+            html += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" stroke="rgba(56,87,35,0.15)" stroke-width="1" stroke-dasharray="3,6"/>';
+            html += '<text x="' + (padL - 6) + '" y="' + (gy + 4) + '" text-anchor="end" fill="var(--text-dim)" font-size="10" font-family="var(--font-mono)">' + gVal + '</text>';
+        }
+
+        channels.forEach(function (ch, i) {
+            var count = channelCounts[ch];
+            var barH = (count / maxCount) * chartH;
+            var x = padL + gap + i * (barW + gap);
+            var y = padT + chartH - barH;
+
+            // Color by density
+            var color = count > 8 ? "var(--signal-hot)" : count > 3 ? "var(--signal-warm)" : "var(--signal-cold)";
+            var glowColor = count > 8 ? "rgba(239,83,80,0.4)" : count > 3 ? "rgba(255,152,0,0.3)" : "rgba(66,165,245,0.2)";
+
+            // Glow filter effect via shadow rect
+            html += '<rect x="' + (x - 2) + '" y="' + (y - 2) + '" width="' + (barW + 4) + '" height="' + (barH + 4) + '" rx="3" fill="' + glowColor + '" filter="url(#spec-blur)"/>';
+            // Main bar with gradient
+            html += '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + barH + '" rx="2" fill="' + color + '" opacity="0.85">';
+            html += '<animate attributeName="height" from="0" to="' + barH + '" dur="0.4s" fill="freeze"/>';
+            html += '<animate attributeName="y" from="' + (padT + chartH) + '" to="' + y + '" dur="0.4s" fill="freeze"/>';
+            html += '</rect>';
+            // Count label on top of bar
+            if (barH > 16) {
+                html += '<text x="' + (x + barW / 2) + '" y="' + (y + 14) + '" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="var(--font-mono)">' + count + '</text>';
+            }
+            // Channel label
+            html += '<text x="' + (x + barW / 2) + '" y="' + (H - 8) + '" text-anchor="middle" fill="var(--text-secondary)" font-size="10" font-family="var(--font-mono)">Ch' + ch + '</text>';
+        });
+
+        // Blur filter definition
+        html = '<defs><filter id="spec-blur"><feGaussianBlur stdDeviation="3"/></filter></defs>' + html;
+
+        svg.innerHTML = html;
+    }
+
+    // ── Frequency Band Donut Chart ──
+
+    function renderBandDonut(devices) {
+        var svg = document.getElementById("band-donut");
+        var listEl = document.getElementById("band-list");
+        var totalEl = document.getElementById("donut-total");
+        if (!svg) return;
+
+        // Classify devices into bands
+        var bandCounts = {};
+        BAND_DEFS.forEach(function (b) { bandCounts[b.id] = 0; });
+        devices.forEach(function (d) {
+            var band = classifyBand(d);
+            bandCounts[band] = (bandCounts[band] || 0) + 1;
+        });
+
+        var total = devices.length;
+        if (totalEl) totalEl.textContent = total;
+
+        // Build donut segments
+        var cx = 120, cy = 120, r = 85, strokeW = 22;
+        var circumference = 2 * Math.PI * r;
+        var html = '';
+        var offset = 0;
+
+        // Sort bands by count descending for visual impact
+        var sortedBands = BAND_DEFS.filter(function (b) { return bandCounts[b.id] > 0; });
+        sortedBands.sort(function (a, b) { return bandCounts[b.id] - bandCounts[a.id]; });
+
+        if (sortedBands.length === 0) {
+            html += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="rgba(56,87,35,0.15)" stroke-width="' + strokeW + '"/>';
+        } else {
+            // Background ring
+            html += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="rgba(38,38,38,0.8)" stroke-width="' + strokeW + '"/>';
+
+            sortedBands.forEach(function (band) {
+                var count = bandCounts[band.id];
+                var pct = total > 0 ? count / total : 0;
+                var segLen = pct * circumference;
+                var gapLen = circumference - segLen;
+                html += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
+                    'stroke="' + band.color + '" stroke-width="' + strokeW + '" ' +
+                    'stroke-dasharray="' + segLen.toFixed(1) + ' ' + gapLen.toFixed(1) + '" ' +
+                    'stroke-dashoffset="' + (-offset).toFixed(1) + '" ' +
+                    'stroke-linecap="round" opacity="0.85" ' +
+                    'transform="rotate(-90 ' + cx + ' ' + cy + ')">' +
+                    '<animate attributeName="stroke-dasharray" from="0 ' + circumference + '" to="' + segLen.toFixed(1) + ' ' + gapLen.toFixed(1) + '" dur="0.6s" fill="freeze"/>' +
+                    '</circle>';
+                offset += segLen;
+            });
+        }
+
+        svg.innerHTML = html;
+
+        // Band list breakdown
+        if (listEl) {
+            var listHtml = '';
+            BAND_DEFS.forEach(function (band) {
+                var count = bandCounts[band.id];
+                if (count === 0) return;
+                var pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                listHtml += '<div class="band-row">';
+                listHtml += '<span class="band-dot" style="background:' + band.color + '"></span>';
+                listHtml += '<span class="band-label">' + band.label + '</span>';
+                listHtml += '<span class="band-count">' + count + '</span>';
+                listHtml += '<span class="band-pct">' + pct + '%</span>';
+                listHtml += '</div>';
+            });
+            listEl.innerHTML = listHtml;
+        }
+    }
+
+    // ── Signal Heatmap Grid ──
+
+    function renderSignalHeatmap(devices) {
+        var svg = document.getElementById("signal-heatmap");
+        if (!svg) return;
+
+        // Group WiFi devices by channel and signal bucket
+        var sigBuckets = [
+            { label: ">-30", min: -30, max: 0 },
+            { label: "-30 to -50", min: -50, max: -30 },
+            { label: "-50 to -70", min: -70, max: -50 },
+            { label: "-70 to -90", min: -90, max: -70 },
+            { label: "<-90", min: -120, max: -90 }
+        ];
+
+        // Collect unique WiFi channels
+        var channelSet = {};
+        devices.forEach(function (d) {
+            if (!d.channel) return;
+            var phy = (d.phy || "").toLowerCase();
+            if (phy.indexOf("802.11") === -1) return;  // WiFi channels only
+            channelSet[d.channel] = true;
+        });
+        var channels = Object.keys(channelSet).sort(function (a, b) { return parseInt(a, 10) - parseInt(b, 10); });
+
+        if (channels.length === 0) {
+            svg.innerHTML = '<text x="200" y="100" text-anchor="middle" fill="var(--text-dim)" font-size="14" font-family="var(--font-mono)">No channel data</text>';
+            return;
+        }
+
+        // Build count grid
+        var grid = {};
+        var maxCell = 0;
+        channels.forEach(function (ch) {
+            grid[ch] = {};
+            sigBuckets.forEach(function (b) { grid[ch][b.label] = 0; });
+        });
+        devices.forEach(function (d) {
+            if (!d.channel || !grid[d.channel]) return;
+            var sig = d.signal;
+            if (sig === 0 || sig == null) return;
+            for (var i = 0; i < sigBuckets.length; i++) {
+                if (sig > sigBuckets[i].min && sig <= sigBuckets[i].max) {
+                    grid[d.channel][sigBuckets[i].label]++;
+                    if (grid[d.channel][sigBuckets[i].label] > maxCell) maxCell = grid[d.channel][sigBuckets[i].label];
+                    break;
+                }
+            }
+        });
+        if (maxCell === 0) maxCell = 1;
+
+        var W = 400, H = 200;
+        var padL = 80, padR = 10, padT = 10, padB = 35;
+        var gridW = W - padL - padR;
+        var gridH = H - padT - padB;
+        var cellW = Math.min(28, gridW / channels.length);
+        var cellH = gridH / sigBuckets.length;
+
+        var html = '';
+
+        // Row labels (signal buckets)
+        sigBuckets.forEach(function (b, row) {
+            var y = padT + row * cellH;
+            html += '<text x="' + (padL - 6) + '" y="' + (y + cellH / 2 + 4) + '" text-anchor="end" fill="var(--text-dim)" font-size="9" font-family="var(--font-mono)">' + b.label + '</text>';
+        });
+
+        // Cells
+        channels.forEach(function (ch, col) {
+            var x = padL + col * cellW;
+            // Column label
+            html += '<text x="' + (x + cellW / 2) + '" y="' + (H - 10) + '" text-anchor="middle" fill="var(--text-secondary)" font-size="9" font-family="var(--font-mono)">' + ch + '</text>';
+
+            sigBuckets.forEach(function (b, row) {
+                var y = padT + row * cellH;
+                var count = grid[ch][b.label];
+                var intensity = count / maxCell;
+                // Green-to-hot color interpolation
+                var r_val, g_val, b_val;
+                if (intensity === 0) {
+                    r_val = 26; g_val = 26; b_val = 26; // empty cell
+                } else if (intensity < 0.5) {
+                    r_val = 56; g_val = Math.round(87 + intensity * 200); b_val = 35; // green range
+                } else {
+                    r_val = Math.round(56 + (intensity - 0.5) * 2 * 183); g_val = Math.round(187 - (intensity - 0.5) * 2 * 100); b_val = 35; // green → red
+                }
+                var cellColor = "rgb(" + r_val + "," + g_val + "," + b_val + ")";
+
+                html += '<rect x="' + (x + 1) + '" y="' + (y + 1) + '" width="' + (cellW - 2) + '" height="' + (cellH - 2) + '" rx="2" fill="' + cellColor + '" opacity="' + (intensity === 0 ? 0.3 : 0.85) + '">';
+                if (count > 0) {
+                    html += '<animate attributeName="opacity" from="0" to="0.85" dur="0.5s" fill="freeze"/>';
+                }
+                html += '</rect>';
+
+                // Count text in cell if non-zero
+                if (count > 0) {
+                    html += '<text x="' + (x + cellW / 2) + '" y="' + (y + cellH / 2 + 3) + '" text-anchor="middle" fill="#fff" font-size="9" font-weight="700" font-family="var(--font-mono)">' + count + '</text>';
+                }
+            });
+        });
+
+        svg.innerHTML = html;
     }
 
     // ── Profile Selector ────────────────────────────────────

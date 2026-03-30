@@ -217,6 +217,7 @@ async def get_devices():
             "signal": d.get("kismet.device.base.signal/kismet.common.signal.last_signal", 0),
             "max_signal": d.get("kismet.device.base.signal/kismet.common.signal.max_signal", 0),
             "channel": d.get("kismet.device.base.channel", ""),
+            "frequency": d.get("kismet.device.base.frequency", 0),
             "packets": d.get("kismet.device.base.packets.total", 0),
             "ssid": d.get("dot11.device/dot11.device.last_beaconed_ssid_record/dot11.advertisedssid.ssid", ""),
             "last_seen": d.get("kismet.device.base.last_time", 0),
