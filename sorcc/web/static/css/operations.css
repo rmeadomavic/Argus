@@ -344,7 +344,12 @@
     width: 100%;
     font-size: var(--font-xs);
     color: var(--signal-warm);
-    padding-top: 4px;
+    padding: var(--gap-sm) var(--gap-md);
+    background: rgba(180, 83, 9, 0.1);
+    border: 1px solid rgba(180, 83, 9, 0.3);
+    border-radius: var(--radius-sm);
+    margin-top: var(--gap-xs);
+    font-weight: 600;
 }
 
 /* ── Sub-Tab Navigation ── */
@@ -415,6 +420,20 @@
     border-color: var(--sorcc-green);
     background: rgba(56, 87, 35, 0.15);
     box-shadow: var(--glow-green);
+}
+.profile-card.active::after {
+    content: '\2713 ACTIVE';
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--sorcc-green-light);
+    text-transform: uppercase;
+}
+.profile-card {
+    position: relative;
 }
 
 .profile-card-name {
@@ -817,6 +836,15 @@
 }
 
 /* ── Hunt Mode ── */
+.hunt-idle-state {
+    text-align: center;
+    padding: var(--sp-8) var(--sp-4);
+    color: var(--text-dim);
+}
+.hunt-idle-icon { font-size: 3rem; margin-bottom: var(--sp-3); opacity: 0.4; }
+.hunt-idle-text { font-size: var(--font-lg); font-weight: 700; text-transform: uppercase; letter-spacing: var(--ls-wide); margin-bottom: var(--sp-2); }
+.hunt-idle-hint { font-size: var(--font-xs); max-width: 400px; margin: 0 auto; line-height: 1.5; }
+
 .hunt-setup {
     margin-bottom: var(--sp-5);
 }

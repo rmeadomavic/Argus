@@ -59,6 +59,62 @@ class _InstructorCORSMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(_InstructorCORSMiddleware)
 
+# ── Token Auth (optional) — same-origin bypass for dashboard, token for external scripts ──
+_AUTH_TOKEN: str | None = None
+_AUTH_PROTECTED_PREFIXES = {"/api/profiles/switch", "/api/wifi-capture/toggle", "/api/config"}
+_AUTH_OPEN_PREFIXES = {"/api/status", "/api/devices", "/api/activity", "/api/events", "/api/logs", "/api/gps", "/api/export", "/api/cot", "/api/waypoints", "/api/preflight", "/static", "/"}
+
+try:
+    import configparser as _cp
+    _cfg = _cp.ConfigParser()
+    _cfg.read("/opt/sorcc/config/sorcc.ini")
+    _AUTH_TOKEN = _cfg.get("dashboard", "api_token", fallback="").strip() or None
+except Exception:
+    pass
+
+
+class _TokenAuthMiddleware(BaseHTTPMiddleware):
+    """Bearer token auth with same-origin bypass.
+
+    Dashboard (same-origin) works without token. External scripts need
+    Authorization: Bearer <token> for control endpoints. Read-only
+    endpoints are always open.
+    """
+    async def dispatch(self, request: Request, call_next):
+        if not _AUTH_TOKEN:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Open endpoints — no auth required
+        for prefix in _AUTH_OPEN_PREFIXES:
+            if path == prefix or path.startswith(prefix + "/") or (prefix == "/" and path == "/"):
+                return await call_next(request)
+
+        # Same-origin bypass — browser requests from the dashboard itself
+        fetch_site = request.headers.get("sec-fetch-site", "")
+        origin = request.headers.get("origin", "")
+        if fetch_site == "same-origin" or (origin and request.base_url.hostname in origin):
+            return await call_next(request)
+
+        # Check bearer token for external requests to protected endpoints
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer ") and auth_header[7:].strip() == _AUTH_TOKEN:
+            return await call_next(request)
+
+        # Protected endpoint, no valid auth
+        for prefix in _AUTH_PROTECTED_PREFIXES:
+            if path.startswith(prefix):
+                return JSONResponse(status_code=401, content={"detail": "Authorization required. Use: Authorization: Bearer <token>"})
+
+        # Everything else — pass through (GET endpoints not in protected list)
+        return await call_next(request)
+
+
+if _AUTH_TOKEN:
+    app.add_middleware(_TokenAuthMiddleware)
+    log.info("Token auth enabled for control endpoints")
+
 
 class _RequestLogMiddleware(BaseHTTPMiddleware):
     """Log every API request with method, path, status, and duration. Catch unhandled exceptions."""
@@ -1014,7 +1070,18 @@ async def config_write(request: Request):
     try:
         updates = await request.json()
         write_config(updates)
-        return {"status": "ok"}
+        events.log("config_updated", sections=list(updates.keys()) if isinstance(updates, dict) else [])
+
+        # Validate after write and return any issues
+        from sorcc.config_schema import validate
+        vr = validate("/opt/sorcc/config/sorcc.ini")
+        result: dict[str, Any] = {"status": "ok"}
+        if vr.errors:
+            result["validation_errors"] = vr.errors
+            result["status"] = "warn"
+        if vr.warnings:
+            result["validation_warnings"] = vr.warnings
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to write config: {e}")
 
@@ -1035,6 +1102,14 @@ async def config_factory_reset():
         raise HTTPException(status_code=404, detail="No factory defaults file found")
     restore_factory()
     return {"status": "ok", "detail": "Restored factory defaults"}
+
+@app.get("/api/config/validate")
+async def config_validate():
+    """Validate the current config and return plain-English errors/warnings."""
+    from sorcc.config_schema import validate
+    vr = validate("/opt/sorcc/config/sorcc.ini")
+    return {"ok": vr.ok, "errors": vr.errors, "warnings": vr.warnings}
+
 
 @app.get("/api/config/export")
 async def config_export():

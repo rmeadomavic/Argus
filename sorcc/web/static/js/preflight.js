@@ -110,12 +110,18 @@
         // Track category worst-status
         var categoryWorst = {};
 
+        // Optional hardware — downgrade WARN to info/gray for non-critical components
+        var optionalChecks = ["SDR (RTL2832U)", "PiSugar Battery"];
+
         checks.forEach(function (check) {
             var m = checkMapping[check.name];
             if (!m) return;
 
             var cls = statusClass(check.status);
-            var sym = statusSymbol(cls);
+            // Downgrade optional hardware warnings to neutral "info" state
+            var isOptional = optionalChecks.indexOf(check.name) !== -1;
+            if (isOptional && cls === "warn") cls = "info";
+            var sym = cls === "info" ? "\u2014" : statusSymbol(cls);
 
             // Update indicator dot
             var el = document.getElementById(m.indicator);
@@ -151,16 +157,22 @@
         var overall = (data.status || "fail").toLowerCase();
         var overallCls = statusClass(overall);
 
-        if (banner) banner.className = "preflight-banner status-" + overallCls;
+        // Smarter banner: green if ≥80%, amber if ≥60%, red below
+        var total = checks.length;
+        var passed = checks.filter(function (c) { return statusClass(c.status) === "pass"; }).length;
+        var failed = checks.filter(function (c) { return statusClass(c.status) === "fail"; }).length;
+        var warned = total - passed - failed;
+        var pct = total > 0 ? passed / total : 0;
+
+        var bannerCls = failed > 0 ? "fail" : pct >= 0.8 ? "pass" : "warn";
+        if (banner) banner.className = "preflight-banner status-" + bannerCls;
         if (bannerText) {
-            if (overallCls === "pass") bannerText.textContent = "READY";
-            else if (overallCls === "warn") bannerText.textContent = "WARNINGS";
-            else bannerText.textContent = "NOT READY";
+            if (bannerCls === "pass") bannerText.textContent = failed === 0 && warned === 0 ? "ALL CLEAR" : "READY";
+            else if (bannerCls === "warn") bannerText.textContent = "READY \u2014 " + warned + " optional";
+            else bannerText.textContent = "NOT READY \u2014 " + failed + " failed";
         }
         if (bannerDetail) {
-            var total = checks.length;
-            var passed = checks.filter(function (c) { return statusClass(c.status) === "pass"; }).length;
-            bannerDetail.textContent = passed + " / " + total + " checks passed";
+            bannerDetail.textContent = passed + " passed" + (warned > 0 ? " \u00B7 " + warned + " optional offline" : "") + (failed > 0 ? " \u00B7 " + failed + " failed" : "");
         }
     }
 

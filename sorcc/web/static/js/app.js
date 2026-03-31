@@ -143,7 +143,7 @@
                 if (footerTs) footerTs.textContent = "TS: " + (s.tailscale_ip || "n/a");
 
                 var footerIp = document.getElementById("footer-ip");
-                if (footerIp && s.hostname) footerIp.textContent = s.hostname;
+                if (footerIp) footerIp.textContent = s.callsign || s.hostname || "--";
 
                 // Active profile badge
                 var profileBadge = document.getElementById("active-profile");

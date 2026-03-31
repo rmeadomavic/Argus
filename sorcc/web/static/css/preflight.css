@@ -183,6 +183,12 @@
     border: 1px solid var(--warning);
 }
 
+.check-indicator.info {
+    background: rgba(100, 100, 100, 0.1);
+    color: #777;
+    border: 1px solid #444;
+}
+
 .check-indicator.fail {
     background: var(--danger-bg);
     color: var(--danger);

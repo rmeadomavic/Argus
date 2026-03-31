@@ -519,6 +519,8 @@
         if (stopBtn) stopBtn.style.display = "";
         if (ssidInput) ssidInput.disabled = true;
         if (huntDisplay) huntDisplay.style.display = "";
+        var huntIdle = document.getElementById("hunt-idle");
+        if (huntIdle) huntIdle.style.display = "none";
         rssiHistory = [];
         prevSignal = -100;
         huntDeltaHistory = [];
@@ -544,6 +546,10 @@
         if (startBtn) startBtn.style.display = "";
         if (stopBtn) stopBtn.style.display = "none";
         if (ssidInput) ssidInput.disabled = false;
+        var huntIdle = document.getElementById("hunt-idle");
+        if (huntIdle) huntIdle.style.display = "";
+        var huntDisplay = document.getElementById("hunt-display");
+        if (huntDisplay) huntDisplay.style.display = "none";
     }
 
     var huntPollInFlight = false;
