@@ -375,12 +375,25 @@
         var escapeHtml = window.SORCC.escapeHtml;
         var signalToPercent = window.SORCC.signalToPercent;
 
-        // Filter by type
+        // Filter by PHY type or frequency band
         var filtered = devices;
         if (activeFilter !== "all") {
-            filtered = devices.filter(function (d) {
-                return d.phy && d.phy.toLowerCase().indexOf(activeFilter.toLowerCase()) !== -1;
-            });
+            if (activeFilter.indexOf("band:") === 0) {
+                // Frequency band filter — use classifyBand
+                var bandFilter = activeFilter.substring(5);
+                filtered = devices.filter(function (d) {
+                    var band = classifyBand(d);
+                    if (bandFilter === "fpv") {
+                        return band === "915mhz" || band === "868mhz" || band === "5.8fpv" || band === "2.4elrs";
+                    }
+                    return band === bandFilter;
+                });
+            } else {
+                // PHY type filter (legacy: Bluetooth, IEEE802.11, etc.)
+                filtered = devices.filter(function (d) {
+                    return d.phy && d.phy.toLowerCase().indexOf(activeFilter.toLowerCase()) !== -1;
+                });
+            }
         }
 
         // Filter by search query
