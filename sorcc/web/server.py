@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import configparser
 import csv
+import hashlib
+import hmac
 import io
 import json
 import logging
+import os
+import secrets
 import socket
 import subprocess
 import time
@@ -15,7 +20,7 @@ from typing import Any
 
 import requests
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -23,7 +28,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 try:
     from sorcc.config_api import (
         read_config, write_config, restore_backup, restore_factory,
-        has_backup, has_factory, set_config_path,
+        has_backup, has_factory, set_config_path, get_config_path,
+        REDACTED_VALUE,
     )
     _HAS_CONFIG_API = True
 except ImportError:
@@ -40,7 +46,87 @@ TEMPLATE_DIR = BASE_DIR / "templates"
 PROJECT_ROOT = BASE_DIR.parent.parent
 PROFILES_PATH = PROJECT_ROOT / "profiles.json"
 
+# ---------------------------------------------------------------------------
+# Web password auth — matches Hydra's pattern
+# ---------------------------------------------------------------------------
+
+_web_password: str | None = None
+_session_secret: bytes = secrets.token_bytes(32)  # rotates each boot
+_session_timeout_sec: int = 8 * 3600  # 8 hours default
+
+# Rate limiting for login attempts  {ip: (fail_count, last_fail_time)}
+_auth_failures: dict[str, tuple[int, float]] = {}
+_AUTH_MAX_FAILURES = 10
+_AUTH_LOCKOUT_SEC = 300  # 5 minutes
+
+
+def configure_web_password(password: str | None, timeout_min: int = 480) -> None:
+    """Set the dashboard password and session timeout. Called at startup."""
+    global _web_password, _session_timeout_sec
+    _web_password = password if password else None
+    _session_timeout_sec = timeout_min * 60
+    if _web_password:
+        log.info("Web password auth enabled (session timeout: %d min).", timeout_min)
+    else:
+        log.info("Web password auth disabled (no password configured).")
+
+
+def _make_session_cookie() -> str:
+    """Create a signed session cookie: nonce:expires:signature."""
+    nonce = secrets.token_hex(16)
+    expires = int(time.time()) + _session_timeout_sec
+    payload = f"{nonce}:{expires}"
+    sig = hmac.new(_session_secret, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}:{sig}"
+
+
+def _validate_session_cookie(cookie: str) -> bool:
+    """Verify HMAC signature and expiry of a session cookie."""
+    parts = cookie.split(":")
+    if len(parts) != 3:
+        return False
+    payload = f"{parts[0]}:{parts[1]}"
+    expected_sig = hmac.new(_session_secret, payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(parts[2], expected_sig):
+        return False
+    try:
+        return int(parts[1]) > time.time()
+    except ValueError:
+        return False
+
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Return True if the client is rate-limited (too many failures)."""
+    if client_ip not in _auth_failures:
+        return False
+    count, last_time = _auth_failures[client_ip]
+    if time.time() - last_time > _AUTH_LOCKOUT_SEC:
+        del _auth_failures[client_ip]
+        return False
+    return count >= _AUTH_MAX_FAILURES
+
+
+def _record_auth_failure(client_ip: str) -> None:
+    """Record a failed login attempt for rate limiting."""
+    now = time.time()
+    if client_ip in _auth_failures:
+        count, _ = _auth_failures[client_ip]
+        _auth_failures[client_ip] = (count + 1, now)
+    else:
+        _auth_failures[client_ip] = (1, now)
+
+
+# Paths that skip password auth entirely
+_AUTH_EXEMPT_PATHS = {"/login", "/api/login", "/api/logout", "/api/status"}
+_AUTH_EXEMPT_PREFIXES = ("/static/",)
+
+
+# ---------------------------------------------------------------------------
+# Middleware
+# ---------------------------------------------------------------------------
+
 _CORS_ALLOWED_PATHS = {"/api/status"}
+
 
 class _InstructorCORSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -51,6 +137,37 @@ class _InstructorCORSMiddleware(BaseHTTPMiddleware):
             response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
         return response
 
+
+class _AuthMiddleware(BaseHTTPMiddleware):
+    """Redirect unauthenticated requests to /login when a password is set."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
+        # Always allow exempt paths
+        if path in _AUTH_EXEMPT_PATHS or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
+            return await call_next(request)
+
+        # If no password configured, allow everything
+        if _web_password is None:
+            return await call_next(request)
+
+        # Check session cookie
+        cookie = request.cookies.get("sorcc_session", "")
+        if cookie and _validate_session_cookie(cookie):
+            return await call_next(request)
+
+        # Not authenticated — return 401 for API, redirect for pages
+        if path.startswith("/api/"):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Login required"},
+                headers={"X-Login-Required": "true"},
+            )
+        return RedirectResponse(url="/login", status_code=302)
+
+
+app.add_middleware(_AuthMiddleware)
 app.add_middleware(_InstructorCORSMiddleware)
 
 if STATIC_DIR.is_dir():
@@ -61,6 +178,21 @@ KISMET_URL = "http://localhost:2501"
 KISMET_USER = "kismet"
 KISMET_PASS = "kismet"
 _active_profile: str = "wifi-survey"
+
+
+@app.on_event("startup")
+async def _startup_load_web_password():
+    """Read web password from config on startup."""
+    if not _HAS_CONFIG_API:
+        return
+    try:
+        cfg = configparser.ConfigParser(inline_comment_prefixes=(";", "#"))
+        cfg.read(get_config_path())
+        password = cfg.get("dashboard", "password", fallback="").strip()
+        timeout = cfg.getint("dashboard", "session_timeout_min", fallback=480)
+        configure_web_password(password or None, timeout)
+    except Exception as e:
+        log.warning("Could not read dashboard password config: %s", e)
 
 
 def kismet_session() -> requests.Session:
@@ -137,6 +269,67 @@ async def index(request: Request):
 @app.get("/instructor", response_class=HTMLResponse)
 async def instructor_page(request: Request):
     return templates.TemplateResponse("instructor.html", {"request": request})
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    # If no password set, just redirect to dashboard
+    if _web_password is None:
+        return RedirectResponse(url="/", status_code=302)
+    # If already authenticated, go to dashboard
+    cookie = request.cookies.get("sorcc_session", "")
+    if cookie and _validate_session_cookie(cookie):
+        return RedirectResponse(url="/", status_code=302)
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": request.query_params.get("error", ""),
+    })
+
+
+@app.post("/api/login")
+async def api_login(request: Request):
+    if _web_password is None:
+        return {"status": "ok", "detail": "No password required"}
+
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Rate limiting
+    if _check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Too many attempts, try again later")
+
+    try:
+        body = await request.json()
+        password = body.get("password", "")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not password:
+        raise HTTPException(status_code=401, detail="Password required")
+
+    if hmac.compare_digest(password, _web_password):
+        cookie_value = _make_session_cookie()
+        response = JSONResponse(content={"status": "ok"})
+        response.set_cookie(
+            key="sorcc_session",
+            value=cookie_value,
+            httponly=True,
+            samesite="lax",
+            path="/",
+            max_age=_session_timeout_sec,
+        )
+        # Clear failure count on success
+        _auth_failures.pop(client_ip, None)
+        return response
+
+    _record_auth_failure(client_ip)
+    raise HTTPException(status_code=401, detail="Wrong password")
+
+
+@app.post("/api/logout")
+async def api_logout(request: Request):
+    response = JSONResponse(content={"status": "ok"})
+    response.delete_cookie(key="sorcc_session", path="/")
+    return response
 
 
 @app.get("/api/status")
@@ -363,6 +556,12 @@ async def config_write(request: Request):
     try:
         updates = await request.json()
         write_config(updates)
+        # Reload web password if it was changed
+        dash = updates.get("dashboard", {})
+        if isinstance(dash, dict) and "password" in dash:
+            pw = dash["password"]
+            if pw and pw != REDACTED_VALUE:
+                configure_web_password(pw, _session_timeout_sec // 60)
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to write config: {e}")
