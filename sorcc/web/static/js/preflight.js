@@ -31,14 +31,6 @@
         "Time Sync":           { indicator: "chk-time-sync",    detail: "chk-time-sync-detail",    cardStatus: "cfg-status" },
     };
 
-    // Which card-status elements belong to which category
-    var categoryCards = {
-        "hw-status":  "hardware",
-        "svc-status": "services",
-        "net-status": "network",
-        "cfg-status": "config"
-    };
-
     function statusClass(st) {
         st = (st || "").toLowerCase();
         if (st === "pass" || st === "ok" || st === "passed") return "pass";
