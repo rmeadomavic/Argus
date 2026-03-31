@@ -61,7 +61,10 @@ sorcc-pi/
     config_api.py                # Config read/write with file locking
     web/
       __init__.py
-      server.py                  # FastAPI app (all API endpoints)
+      server.py                  # FastAPI app — routes, middleware (~1100 lines)
+      kismet.py                  # Kismet REST client — session/response caching
+      oui.py                     # OUI manufacturer lookup + BT device classification
+      logging_config.py          # Structured logging — rotation, JSON, ring buffer
       static/
         css/
           variables.css          # Design system tokens
@@ -154,9 +157,20 @@ All tunables live in `config/sorcc.ini` (INI format). Sections:
 - `GET /api/profiles/active` — Current active profile
 - `POST /api/profiles/switch` — Switch profile (reconfigures Kismet sources)
 
-**Export:**
+**Export & Integration:**
 - `GET /api/export/kml` — Export Kismet data as KML
 - `GET /api/export/csv` — Export device list as CSV
+- `GET /api/cot` — CoT/TAK XML for all GPS-located devices (ATAK compatible)
+- `GET /api/cot/{mac}` — CoT XML for a single device
+
+**Activity & Monitoring:**
+- `GET /api/activity` — Recent device discoveries, new/min rate
+- `GET /api/logs?n=100&level=WARNING` — Dashboard log entries from ring buffer
+- `GET /api/wifi-capture/status` — WiFi adapter mode (managed vs monitor)
+- `POST /api/wifi-capture/toggle` — Toggle WiFi between connectivity and capture
+
+**Hunt Mode:**
+- `GET /api/target/{query}` — Hunt by SSID name OR MAC address (BT + WiFi)
 
 ## Development Guidelines
 
@@ -197,6 +211,57 @@ exactly what to do next. Silent failures are unacceptable.
 - Each profile specifies which Kismet data sources to activate
 - Switched via web UI dropdown or POST `/api/profiles/switch`
 - 5 profiles: WiFi Survey, Bluetooth Recon, TPMS Monitoring, ADS-B Aircraft, Full Spectrum
+
+### Deployment Workflow
+
+The repo lives at `/home/kali/SORCC-PI/`. The live deployment is at `/opt/sorcc/`.
+The systemd service runs from `/opt/sorcc/`, NOT the repo directory.
+
+```bash
+# Edit code in the repo, then sync to deployment:
+rsync -av --exclude='__pycache__' ~/SORCC-PI/sorcc/ /opt/sorcc/sorcc/
+
+# Restart the dashboard after syncing:
+sudo systemctl restart sorcc-dashboard
+
+# Verify it's running:
+curl -s http://localhost:8080/api/status | python3 -m json.tool
+
+# Check logs:
+curl -s http://localhost:8080/api/logs?n=20
+journalctl -u sorcc-dashboard -f
+cat /opt/sorcc/logs/dashboard.log
+```
+
+**Passwords:** `sudo`, Kismet, and all system passwords are either `kismet` or `sorcc`.
+
+### Recursive Dev Session Setup
+
+For dual-tab browser sessions (Claude Code CLI + UI audit):
+
+**Tab 1 prompt (CLI backend):**
+> Start a recursive dev session on SORCC-PI. Check memory for session context
+> and docs/NEXT-SESSION-TODO.md for the task list. Deploy path is /opt/sorcc/,
+> repo is /home/kali/SORCC-PI/. Work through the TODO priorities in order.
+> My browser instance is watching the UI live and will feed back visual issues.
+
+**Tab 2 prompt (Visual QA):**
+> You are a visual QA auditor for the SORCC-PI dashboard at 100.71.115.45:8080.
+> Audit the UI from three personas: 1) A soldier using it in the field on a phone,
+> 2) An instructor demoing to a classroom, 3) A general visiting Oak Grove.
+> Report every visual bug, UX issue, broken feature, and polish opportunity.
+> The CLI session is fixing things live — re-check after each fix. Be ruthless.
+
+### Known Hardware State (Test Pi)
+
+- WiFi (wlan0): connected to CHIMERA — no external monitor adapter
+- Ethernet: connected (safe for WiFi capture testing)
+- LTE: Telit LE910C4-NF, connected
+- GPS: NMEA enabled, no fix indoors (works outdoors)
+- Bluetooth (hci0): 500+ devices, signal=0 (Kismet HCI limitation — use packet counts)
+- RTL-SDR: NOT connected
+- PiSugar: NOT connected
+- Tailscale: 100.71.115.45
 
 ### Common Commands
 
