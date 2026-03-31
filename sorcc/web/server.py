@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -466,52 +467,82 @@ async def get_status():
         "callsign": _get_callsign(),
         "wifi_capture": _wifi_capture_status()["active"],
     }
-    try:
-        r = requests.get(f"{ks.KISMET_URL}/system/status.json", auth=(ks.KISMET_USER, ks.KISMET_PASS), timeout=2)
-        if r.status_code == 200:
-            status["kismet"] = True
-            data = r.json()
-            if isinstance(data, dict):
-                status["device_count"] = data.get("kismet.system.devices.count", 0)
-    except Exception:
-        pass
-    try:
-        result = subprocess.run(["mmcli", "-L"], capture_output=True, text=True, timeout=5)
-        status["modem"] = "/" in result.stdout
-    except Exception:
-        pass
-    try:
-        result = subprocess.run(["mmcli", "-m", _get_modem_index(), "--location-get"], capture_output=True, text=True, timeout=5)
-        # Check for actual GPS fix — look for latitude coordinate or valid NMEA fix
-        # $GPGGA with fix quality > 0, or explicit latitude value means we have a fix
-        has_nmea = "nmea" in result.stdout.lower()
-        has_fix = "latitude" in result.stdout.lower()
-        # Check NMEA for valid fix: $GPGGA,time,lat,N,lon,W,1 (fix quality=1+)
+
+    async def _run(cmd: list[str], timeout: float = 5) -> tuple[str, int]:
+        """Run subprocess without blocking the event loop."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            return stdout.decode(), proc.returncode or 0
+        except (asyncio.TimeoutError, FileNotFoundError, OSError):
+            return "", 1
+
+    async def _check_kismet():
+        try:
+            loop = asyncio.get_running_loop()
+            r = await loop.run_in_executor(None, lambda: requests.get(
+                f"{ks.KISMET_URL}/system/status.json",
+                auth=(ks.KISMET_USER, ks.KISMET_PASS), timeout=2))
+            if r.status_code == 200:
+                status["kismet"] = True
+                data = r.json()
+                if isinstance(data, dict):
+                    status["device_count"] = data.get("kismet.system.devices.count", 0)
+        except Exception:
+            pass
+
+    async def _check_modem():
+        out, _ = await _run(["mmcli", "-L"])
+        status["modem"] = "/" in out
+
+    async def _check_gps():
+        modem_idx = _get_modem_index()
+        out, _ = await _run(["mmcli", "-m", modem_idx, "--location-get"])
+        has_nmea = "nmea" in out.lower()
+        has_fix = "latitude" in out.lower()
         if has_nmea and not has_fix:
-            for line in result.stdout.splitlines():
+            for line in out.splitlines():
                 if "$GPGGA" in line:
                     parts = line.split(",")
                     if len(parts) > 6 and parts[6] not in ("", "0"):
                         has_fix = True
                         break
         status["gps"] = has_fix
-        status["gps_enabled"] = has_nmea  # GPS powered but may not have fix
-    except Exception:
-        pass
-    try:
-        result = subprocess.run(["bash", "-c", 'echo "get battery" | nc -q 1 127.0.0.1 8423'], capture_output=True, text=True, timeout=3)
-        if result.stdout.strip():
-            parts = result.stdout.strip().split(":")
-            if len(parts) >= 2:
-                status["battery"] = float(parts[1].strip())
-    except Exception:
-        pass
-    try:
-        result = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3)
-        if result.returncode == 0 and result.stdout.strip():
-            status["tailscale_ip"] = result.stdout.strip()
-    except Exception:
-        pass
+        status["gps_enabled"] = has_nmea
+
+    async def _check_battery():
+        # PiSugar battery check via its local TCP interface — fast TCP probe first
+        try:
+            # Quick connect test (100ms timeout) — avoids 1.5s hang when PiSugar absent
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", 8423), timeout=0.1)
+            writer.write(b"get battery\n")
+            await writer.drain()
+            out = await asyncio.wait_for(reader.read(256), timeout=0.15)
+            writer.close()
+            text = out.decode().strip()
+            if text:
+                parts = text.split(":")
+                if len(parts) >= 2:
+                    status["battery"] = float(parts[1].strip())
+        except (asyncio.TimeoutError, ConnectionRefusedError, OSError, ValueError):
+            pass
+
+    async def _check_tailscale():
+        out, rc = await _run(["tailscale", "ip", "-4"], timeout=3)
+        if rc == 0 and out.strip():
+            status["tailscale_ip"] = out.strip()
+
+    # Run all checks in parallel
+    t0 = time.time()
+    results = await asyncio.gather(
+        _check_kismet(), _check_modem(), _check_gps(),
+        _check_battery(), _check_tailscale(),
+        return_exceptions=True,
+    )
+    log.debug("Status checks took %.0fms", (time.time() - t0) * 1000)
+
     try:
         status["hostname"] = socket.gethostname()
         with open("/proc/uptime") as f:
