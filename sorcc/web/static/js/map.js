@@ -18,10 +18,10 @@
     var satelliteLayer = null;
     var isSatellite = false;
 
-    // Default center — will recenter on first GPS fix
-    var DEFAULT_LAT = 39.8283;
-    var DEFAULT_LON = -98.5795;
-    var DEFAULT_ZOOM = 4;
+    // Default center — Fort Campbell area (SORCC home base)
+    var DEFAULT_LAT = 36.6636;
+    var DEFAULT_LON = -87.4731;
+    var DEFAULT_ZOOM = 13;
     var HAS_FIRST_FIX = false;
 
     // Fix Leaflet default icon path for local install
@@ -212,8 +212,9 @@
                 // Update GPS info in stats
                 var gpsInfo = document.getElementById("map-gps-info");
                 if (gpsInfo) {
-                    gpsInfo.textContent = gps.lat.toFixed(5) + ", " + gps.lon.toFixed(5);
+                    gpsInfo.textContent = "\u2705 GPS Fix: " + gps.lat.toFixed(5) + ", " + gps.lon.toFixed(5);
                     if (gps.alt) gpsInfo.textContent += " | " + gps.alt.toFixed(0) + "m";
+                    gpsInfo.style.color = "";
                 }
 
                 positionMarker.bindPopup(

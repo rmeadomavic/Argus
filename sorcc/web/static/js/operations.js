@@ -135,8 +135,8 @@
             if (phy.indexOf("802.11") !== -1) wifi++;
             else if (phy.indexOf("bluetooth") !== -1) bt++;
             else other++;
-            // "Active" = devices with recent packet activity (replaces "Strong >-50")
-            if (d.activity && d.activity >= 1) active++;
+            // "Active" = devices with any packets (being tracked by Kismet)
+            if (d.packets && d.packets > 0) active++;
             // Category breakdown
             var cat = d.category || "other";
             categories[cat] = (categories[cat] || 0) + 1;
@@ -162,14 +162,14 @@
         setStatValue("stat-bt", bt);
         setStatValue("stat-other", other);
         setStatValue("stat-strong", active);
-        // Update strong label to say "Active" instead of "Strong (>-50)"
+        // Update strong label to say "Tracked" (devices with packets)
         var strongLabel = document.querySelector("#stat-strong")
         if (strongLabel) {
             var labelEl = strongLabel.parentElement && strongLabel.parentElement.querySelector(".stat-card-label");
-            if (labelEl && labelEl.textContent.indexOf("Strong") !== -1) labelEl.textContent = "Active";
+            if (labelEl) labelEl.textContent = "Tracked";
         }
         var newEl = document.getElementById("stat-new");
-        if (newEl) newEl.textContent = newPerMinute > 0 ? "+" + newPerMinute : "--";
+        if (newEl) newEl.textContent = newPerMinute > 0 ? "+" + newPerMinute : "0";
 
         // Update leaderboard — top 8 by packet count
         renderLeaderboard(devices);
@@ -215,9 +215,10 @@
 
             var info = document.createElement("span");
             info.className = "leaderboard-info";
-            var name = d.manufacturer && d.manufacturer !== "Random BLE" ? d.manufacturer : (d.name || d.mac || "Unknown");
-            if (name.length > 18) name = name.substring(0, 16) + "\u2026";
+            var fullName = d.manufacturer && d.manufacturer !== "Random BLE" ? d.manufacturer : (d.name || d.mac || "Unknown");
+            var name = fullName.length > 18 ? fullName.substring(0, 16) + "\u2026" : fullName;
             info.textContent = name;
+            info.title = fullName + (d.mac ? " (" + d.mac + ")" : "");
             row.appendChild(info);
 
             var bar = document.createElement("span");
@@ -436,7 +437,7 @@
             // Meta line: MAC + category + packets
             var meta = d.mac || "";
             if (category !== "other" && category !== "unknown") meta += " | " + category;
-            if (d.channel) meta += " | Ch " + d.channel;
+            if (d.channel && d.channel !== "FHSS") meta += " | Ch " + d.channel;
             meta += " | " + packets + " pkts";
             if (d.is_new) meta += " | NEW";
 
@@ -1021,7 +1022,8 @@
         if (badge) badge.textContent = channels.length + " channels";
 
         if (channels.length === 0) {
-            svg.innerHTML = '<text x="360" y="110" text-anchor="middle" fill="var(--text-dim)" font-size="14" font-family="var(--font-mono)">No WiFi channels detected</text>';
+            svg.innerHTML = '<text x="360" y="100" text-anchor="middle" fill="var(--text-dim)" font-size="14" font-family="var(--font-mono)">No WiFi channels detected</text>' +
+                '<text x="360" y="125" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-sans)">Enable WiFi Capture on the Live View tab to see channel data</text>';
             return;
         }
 
@@ -1290,7 +1292,8 @@
         var channels = Object.keys(channelSet).sort(function (a, b) { return parseInt(a, 10) - parseInt(b, 10); });
 
         if (channels.length === 0) {
-            svg.innerHTML = '<text x="200" y="100" text-anchor="middle" fill="var(--text-dim)" font-size="14" font-family="var(--font-mono)">No channel data</text>';
+            svg.innerHTML = '<text x="200" y="90" text-anchor="middle" fill="var(--text-dim)" font-size="14" font-family="var(--font-mono)">No channel data</text>' +
+                '<text x="200" y="115" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-sans)">WiFi capture required for channel analysis</text>';
             return;
         }
 
@@ -1612,10 +1615,10 @@
             btnEl.className = "wifi-capture-btn capturing";
             warningEl.style.display = "none";
         } else {
-            statusEl.textContent = "Off — WiFi connected";
+            statusEl.textContent = "Capture OFF \u2014 WiFi normal, LTE active";
             statusEl.className = "wifi-capture-status inactive";
-            btnText.textContent = "Enable Capture";
-            btnEl.className = "wifi-capture-btn";
+            btnText.textContent = "Enable Monitor Mode";
+            btnEl.className = "wifi-capture-btn wifi-capture-warn";
             warningEl.style.display = "none";
         }
     }

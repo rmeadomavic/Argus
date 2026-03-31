@@ -209,7 +209,7 @@
         </div>
         <div class="map-info-bar">
             <span class="map-stats" id="map-stats">--</span>
-            <span class="map-gps-info" id="map-gps-info">No GPS fix</span>
+            <span class="map-gps-info" id="map-gps-info" style="color:var(--signal-warm)">Waiting for GPS fix — map will center when acquired</span>
         </div>
         <div id="sorcc-map" style="height:min(500px, 60vh);border-radius:8px;border:1px solid var(--border);"></div>
         <div class="map-legend">
@@ -395,11 +395,10 @@
             <h2>System Logs</h2>
             <div class="log-controls">
                 <select id="log-level-filter" class="log-filter-select">
+                    <option value="WARNING" selected>WARNING+</option>
+                    <option value="ERROR">ERROR only</option>
+                    <option value="INFO">INFO+</option>
                     <option value="">All Levels</option>
-                    <option value="ERROR">ERROR</option>
-                    <option value="WARNING">WARNING</option>
-                    <option value="INFO">INFO</option>
-                    <option value="DEBUG">DEBUG</option>
                 </select>
                 <button id="log-pause-btn" class="btn-secondary log-btn" title="Pause auto-scroll">&#9646;&#9646; Pause</button>
                 <button id="log-refresh-btn" class="btn-secondary log-btn" title="Refresh now">&#8635; Refresh</button>
@@ -420,21 +419,51 @@
 <div id="subtab-export" class="sub-content">
     <div class="panel">
         <h2>Data Export</h2>
-        <p>Export Kismet capture data for analysis and visualization.</p>
+        <div class="export-status-bar" id="export-status-bar">
+            <span class="export-stat">
+                <span class="export-stat-value" id="export-device-count">--</span> devices tracked
+            </span>
+            <span class="export-stat">
+                <span class="export-stat-value" id="export-located-count">--</span> GPS-located
+            </span>
+            <span class="export-stat" id="export-gps-status">
+                GPS: <span id="export-gps-state">checking...</span>
+            </span>
+        </div>
 
-        <div class="export-actions">
-            <button id="export-kml" class="btn-primary btn-large">
-                Download KML File
-            </button>
-            <button id="export-csv" class="btn-secondary btn-large">
-                Download CSV
-            </button>
-            <button id="export-waypoints" class="btn-secondary btn-large">
-                Download Waypoints
-            </button>
-            <button id="export-cot" class="btn-secondary btn-large">
-                Download CoT XML
-            </button>
+        <div class="export-grid">
+            <div class="export-card">
+                <div class="export-card-header">
+                    <h3>CSV</h3>
+                    <span class="export-card-badge">All Devices</span>
+                </div>
+                <p class="export-card-desc">Full device list with MAC, signal, packets, manufacturer</p>
+                <button id="export-csv" class="btn-primary export-btn">Download CSV</button>
+            </div>
+            <div class="export-card">
+                <div class="export-card-header">
+                    <h3>KML</h3>
+                    <span class="export-card-badge export-gps-req">Requires GPS</span>
+                </div>
+                <p class="export-card-desc">Google Earth placemarks for all located devices</p>
+                <button id="export-kml" class="btn-primary export-btn">Download KML</button>
+            </div>
+            <div class="export-card">
+                <div class="export-card-header">
+                    <h3>CoT XML</h3>
+                    <span class="export-card-badge export-gps-req">Requires GPS</span>
+                </div>
+                <p class="export-card-desc">ATAK-compatible Cursor on Target with MIL-STD-2525 types</p>
+                <button id="export-cot" class="btn-primary export-btn">Download CoT</button>
+            </div>
+            <div class="export-card">
+                <div class="export-card-header">
+                    <h3>Waypoints</h3>
+                    <span class="export-card-badge export-gps-req">Requires GPS</span>
+                </div>
+                <p class="export-card-desc">Mission Planner waypoint file for autonomous RF hunt</p>
+                <button id="export-waypoints" class="btn-primary export-btn">Download WPL</button>
+            </div>
         </div>
 
         <div class="export-instructions">
