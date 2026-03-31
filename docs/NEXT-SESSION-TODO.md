@@ -2,7 +2,7 @@
 
 **Setup:** Two browser tabs — Tab 1: Claude Code CLI on Pi, Tab 2: Dashboard UI at `100.71.115.45:8080`
 
-**Pi is on ethernet now** — WiFi capture toggle can be tested safely without losing connectivity.
+**Pi is on LTE/Tailscale** — WiFi capture toggle can be tested safely without losing connectivity.
 
 ---
 
@@ -19,18 +19,17 @@
 ## Priority 2: TAK/ATAK Integration — NEEDS OUTDOOR GPS
 
 - [ ] **Test CoT outdoors** — Take Pi outside, get GPS fix, verify /api/cot produces valid XML
+- [x] **CoT self-position endpoint** — /api/cot/self broadcasts Pi's own GPS position to ATAK
 - [ ] **TAK Server feed** — Test with an actual ATAK instance (or TAK Server simulator)
 - [ ] **CoT streaming** — WebSocket or SSE feed for real-time CoT updates to ATAK
 - [ ] **CoT type refinement** — Better type codes based on WiFi vs BT vs SDR device types
 
-## Priority 3: WiFi Capture Testing
+## Priority 3: WiFi Capture Testing — DONE (2026-03-31, Chunk 12)
 
-- [ ] **Test WiFi toggle** — Enable monitor mode via UI, verify:
-  - Dashboard stays accessible via ethernet/LTE/Tailscale
-  - WiFi devices appear in Kismet
-  - Hunt mode works with WiFi SSIDs
-  - Toggle back to managed mode reconnects WiFi
-- [ ] **WiFi + BT simultaneous** — Verify both adapters feed Kismet in Full Spectrum mode
+- [x] **Test WiFi toggle** — Toggle mechanics work correctly via UI
+- [x] **Finding: onboard brcmfmac enters monitor mode but captures 0 packets**
+- [x] **Recommendation: External USB adapter (Alpha cards) needed for actual WiFi capture**
+- [ ] **WiFi + BT simultaneous** — Verify both adapters feed Kismet (needs external adapter)
 
 ## Priority 4: FPV Frequency Detection — NEEDS SDR
 
@@ -46,18 +45,13 @@
 
 ## Priority 5: Installer & Fresh Test — PARTIALLY DONE
 
-- [x] **Harden sorcc-setup.sh** — Added:
-  - Uses requirements.txt for pip deps
-  - rsync instead of cp for module sync
-  - Log directory creation (/opt/sorcc/logs/)
-  - Module file verification check
-  - Python import verification post-install
+- [x] **Harden sorcc-setup.sh** — Uses requirements.txt, rsync, module verification, log dir
 - [x] **Boot service** — GPS auto-enables on boot via mmcli + AT command fallback
 - [ ] **Fresh install test** — Wipe SD card, flash Kali, run installer, verify everything works
 
 ## Priority 6: MAVLink / Autonomous Hunt
 
-- [ ] **MAVLink waypoint export** — /api/waypoints endpoint generating Mission Planner compatible waypoints
+- [x] **MAVLink waypoint export** — /api/waypoints endpoint (QGC WPL 110 format)
 - [ ] **Convergence algorithm** — Design the logic for autonomous signal convergence
 - [ ] **FC connection** — Test MAVLink serial connection to Matek H743 / Pixhawk 6C
 
@@ -66,6 +60,20 @@
 - [ ] **Update README** — Reflect new endpoints, modules, CoT capability
 - [ ] **API docs** — Auto-generate from FastAPI OpenAPI schema
 - [ ] **CLAUDE.md** — Update with new module structure and endpoints
+
+## Completed Since Last Session (Chunks 9-12, 2026-03-31)
+
+- **Chunk 9:** QA audit — 12 browser issues fixed (stat counts, activity feed, detail panel, etc.)
+- **Chunk 10:** Event logger with SHA-256 hash chain (chain-of-custody integrity)
+- **Chunk 11:** TLS support, token auth, config validation, QA fixes 9-18
+- **Chunk 12:** WiFi capture toggle fix (Kismet restart instead of hot-add), export status bar, logs auto-retry
+
+## Completed This Session
+
+- **Dynamic modem index** — Fixed hardcoded `mmcli -m 0` to auto-detect modem index (was at index 1)
+- **GPS enabled** — NMEA data flowing, no fix indoors (expected)
+- **CoT self-position** — New /api/cot/self endpoint for sensor platform SA in ATAK
+- **Device count:** 751+ (up from 577)
 
 ---
 

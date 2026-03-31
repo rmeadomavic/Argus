@@ -65,6 +65,7 @@ sorcc-pi/
       kismet.py                  # Kismet REST client — session/response caching
       oui.py                     # OUI manufacturer lookup + BT device classification
       logging_config.py          # Structured logging — rotation, JSON, ring buffer
+      event_logger.py            # SHA-256 hash-chained JSONL audit trail
       static/
         css/
           variables.css          # Design system tokens
@@ -108,8 +109,10 @@ sorcc-pi/
 
 | Port | Baud | Purpose |
 |------|------|---------|
-| `/dev/ttyUSB1` | 9600 | GPS NMEA data (via LTE modem) |
-| `/dev/ttyUSB2` | 115200 | AT command interface (LTE modem) |
+| `/dev/ttyUSB2` | 9600 | GPS NMEA data (via LTE modem) |
+| `/dev/cdc-wdm0` | — | QMI primary control (LTE modem) |
+
+Note: Port assignments may vary. Use `sudo mmcli -m $(mmcli -L | grep -oP '/Modem/\K[0-9]+')` to check current assignments.
 
 ### Systemd Services
 
@@ -161,6 +164,7 @@ All tunables live in `config/sorcc.ini` (INI format). Sections:
 - `GET /api/export/kml` — Export Kismet data as KML
 - `GET /api/export/csv` — Export device list as CSV
 - `GET /api/cot` — CoT/TAK XML for all GPS-located devices (ATAK compatible)
+- `GET /api/cot/self` — CoT XML for the Pi's own position (sensor platform SA)
 - `GET /api/cot/{mac}` — CoT XML for a single device
 
 **Activity & Monitoring:**

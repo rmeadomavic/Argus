@@ -132,15 +132,49 @@ CATEGORY_ICONS: dict[str, str] = {
 
 # Name-based classification heuristics
 _NAME_PATTERNS: list[tuple[str, tuple[str, str]]] = [
+    # Apple
     ("iphone", ("Apple", "phone")), ("ipad", ("Apple", "tablet")),
     ("macbook", ("Apple", "laptop")), ("apple watch", ("Apple", "wearable")),
-    ("airpods", ("Apple", "wearable")), ("galaxy", ("Samsung", "phone")),
-    ("pixel", ("Google", "phone")), ("fitbit", ("Fitbit", "wearable")),
-    ("garmin", ("Garmin", "wearable")), ("tile", ("Tile", "beacon")),
+    ("airpods", ("Apple", "wearable")),
+    # Android phones
+    ("galaxy", ("Samsung", "phone")), ("pixel", ("Google", "phone")),
+    ("oneplus", ("OnePlus", "phone")), ("redmi", ("Xiaomi", "phone")),
+    ("poco", ("Xiaomi", "phone")), ("moto ", ("Motorola", "phone")),
+    # Wearables & headphones
+    ("fitbit", ("Fitbit", "wearable")), ("garmin", ("Garmin", "wearable")),
+    ("fenix", ("Garmin", "wearable")), ("forerunner", ("Garmin", "wearable")),
+    ("venu", ("Garmin", "wearable")), ("instinct", ("Garmin", "wearable")),
+    ("shokz", ("Shokz", "wearable")), ("openfit", ("Shokz", "wearable")),
+    ("openrun", ("Shokz", "wearable")),
+    ("nothing ear", ("Nothing", "wearable")), ("nothing phone", ("Nothing", "phone")),
+    ("buds", ("Samsung", "wearable")), ("band ", ("Xiaomi", "wearable")),
+    ("mi band", ("Xiaomi", "wearable")),
+    # Smart speakers
     ("echo", ("Amazon", "speaker")), ("alexa", ("Amazon", "speaker")),
-    ("surface", ("Microsoft", "laptop")), ("xbox", ("Microsoft", "other")),
+    ("google home", ("Google", "speaker")), ("nest", ("Google", "speaker")),
+    ("homepod", ("Apple", "speaker")),
+    # Audio
     ("bose", ("Bose", "speaker")), ("jbl", ("JBL", "speaker")),
-    ("tesla", ("Tesla", "vehicle")), ("meta quest", ("Meta", "wearable")),
+    ("sonos", ("Sonos", "speaker")), ("harman", ("Harman", "speaker")),
+    ("beats", ("Apple", "wearable")), ("sony wh-", ("Sony", "wearable")),
+    ("sony wf-", ("Sony", "wearable")),
+    # Laptops / PCs
+    ("surface", ("Microsoft", "laptop")), ("laptop-", ("Windows PC", "laptop")),
+    ("desktop-", ("Windows PC", "laptop")),
+    # Gaming / VR
+    ("xbox", ("Microsoft", "other")), ("meta quest", ("Meta", "wearable")),
+    ("playstation", ("Sony", "other")), ("switch", ("Nintendo", "other")),
+    # Vehicles
+    ("tesla", ("Tesla", "vehicle")),
+    # IoT / Smart Home
+    ("ring ", ("Amazon", "iot")), ("wyze", ("Wyze", "iot")),
+    ("tuya", ("Tuya", "iot")), ("smartthings", ("Samsung", "iot")),
+    ("hue", ("Philips", "iot")),
+    # Trackers
+    ("tile", ("Tile", "beacon")), ("airtag", ("Apple", "beacon")),
+    ("chipolo", ("Chipolo", "beacon")),
+    # Samsung display/appliance patterns (e.g. "S19" = TV series)
+    ("[tv]", ("Samsung", "iot")), ("[monitor]", ("Samsung", "iot")),
 ]
 
 
@@ -166,7 +200,7 @@ def classify_device(mac: str, name: str = "", dev_type: str = "") -> dict[str, s
             result["icon"] = CATEGORY_ICONS.get(cat, CATEGORY_ICONS["other"])
             return result
 
-    # BLE random address detection (bit 1 of first byte = 1 means random)
+    # BLE random address detection (bit 1 of first byte = 1 means locally administered)
     if mac and len(mac) >= 2:
         try:
             first_byte = int(mac[:2], 16)
@@ -174,7 +208,14 @@ def classify_device(mac: str, name: str = "", dev_type: str = "") -> dict[str, s
                 result["manufacturer"] = "Random BLE"
                 result["category"] = "phone"
                 result["icon"] = CATEGORY_ICONS["phone"]
+                return result
         except ValueError:
             pass
+
+    # BLE device with no friendly name (name == MAC) — likely anonymous advertiser
+    if dev_type in ("BTLE", "BR/EDR") and name and name == mac:
+        result["manufacturer"] = "BLE Device"
+        result["category"] = "phone"
+        result["icon"] = CATEGORY_ICONS["phone"]
 
     return result

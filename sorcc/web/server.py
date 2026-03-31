@@ -38,6 +38,32 @@ from sorcc.web.logging_config import setup_logging, ring_handler
 setup_logging()
 log = logging.getLogger(__name__)
 
+_cached_modem_index: str | None = None
+_cached_modem_index_time: float = 0
+
+
+def _get_modem_index() -> str:
+    """Dynamically detect the first ModemManager modem index.
+
+    Modem indices can change across reboots or USB re-enumeration,
+    so we parse ``mmcli -L`` rather than hardcoding ``-m 0``.
+    Result is cached for 60 seconds to avoid repeated subprocess calls.
+    """
+    global _cached_modem_index, _cached_modem_index_time
+    if _cached_modem_index is not None and (time.time() - _cached_modem_index_time) < 60:
+        return _cached_modem_index
+    try:
+        result = subprocess.run(["mmcli", "-L"], capture_output=True, text=True, timeout=5)
+        for line in result.stdout.splitlines():
+            if "/Modem/" in line:
+                _cached_modem_index = line.strip().split("/Modem/")[1].split()[0]
+                _cached_modem_index_time = time.time()
+                return _cached_modem_index
+    except Exception:
+        pass
+    return "0"
+
+
 app = FastAPI(title="SORCC RF Survey Dashboard", version="2.0.0")
 
 BASE_DIR = Path(__file__).parent
@@ -204,7 +230,7 @@ async def instructor_page(request: Request):
 async def restart_lte():
     try:
         result = subprocess.run(
-            ["mmcli", "-m", "0", "--reset"],
+            ["mmcli", "-m", _get_modem_index(), "--reset"],
             capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
@@ -455,7 +481,7 @@ async def get_status():
     except Exception:
         pass
     try:
-        result = subprocess.run(["mmcli", "-m", "0", "--location-get"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(["mmcli", "-m", _get_modem_index(), "--location-get"], capture_output=True, text=True, timeout=5)
         # Check for actual GPS fix — look for latitude coordinate or valid NMEA fix
         # $GPGGA with fix quality > 0, or explicit latitude value means we have a fix
         has_nmea = "nmea" in result.stdout.lower()
@@ -788,7 +814,7 @@ async def get_events_history(n: int = 50):
 async def get_gps():
     gps: dict[str, Any] = {"lat": None, "lon": None, "alt": None, "source": None}
     try:
-        result = subprocess.run(["mmcli", "-m", "0", "--location-get"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(["mmcli", "-m", _get_modem_index(), "--location-get"], capture_output=True, text=True, timeout=5)
         for line in result.stdout.splitlines():
             line = line.strip()
             if "latitude" in line.lower():
@@ -821,6 +847,9 @@ async def get_gps():
 @app.get("/api/export/kml")
 async def export_kml():
     import glob as glob_mod
+    output_kml = "/tmp/sorcc-survey-export.kml"
+
+    # Try kismetdb_to_kml first (best quality — uses full capture data)
     capture_dirs = ["/opt/sorcc/output_data", "/root", "/tmp"]
     kismet_files: list[str] = []
     for d in capture_dirs:
@@ -829,32 +858,35 @@ async def export_kml():
     if not kismet_files:
         kismet_files.extend(glob_mod.glob("/home/*/*.kismet"))
         kismet_files.extend(glob_mod.glob("/home/*/Kismet-*.kismet"))
-    if not kismet_files:
-        raise HTTPException(status_code=404, detail="No Kismet capture files found. Run Kismet first.")
-    latest = max(kismet_files, key=lambda f: Path(f).stat().st_mtime)
-    output_kml = "/tmp/sorcc-survey-export.kml"
-    if subprocess.run(["which", "kismetdb_to_kml"], capture_output=True).returncode == 0:
-        result = subprocess.run(["kismetdb_to_kml", "-v", "--in", latest, "--out", output_kml], capture_output=True, text=True, timeout=30)
-        if result.returncode == 0 and Path(output_kml).exists():
-            return FileResponse(output_kml, media_type="application/vnd.google-earth.kml+xml", filename="sorcc-survey.kml")
-    try:
-        devices = await get_devices()
-        kml = ET.Element("kml", xmlns="http://www.opengis.net/kml/2.2")
-        doc = ET.SubElement(kml, "Document")
-        ET.SubElement(doc, "name").text = "SORCC RF Survey Export"
-        for dev in devices:
-            if dev.get("signal", -100) > -90:
-                pm = ET.SubElement(doc, "Placemark")
-                ET.SubElement(pm, "name").text = dev.get("name") or dev.get("mac", "Unknown")
-                desc = f"Signal: {dev['signal']} dBm | MAC: {dev['mac']} | Type: {dev['type']}"
-                if dev.get("ssid"): desc += f" | SSID: {dev['ssid']}"
-                ET.SubElement(pm, "description").text = desc
-        tree = ET.ElementTree(kml)
-        tree.write(output_kml, xml_declaration=True, encoding="utf-8")
-        events.log("export_generated", format="kml")
-        return FileResponse(output_kml, media_type="application/vnd.google-earth.kml+xml", filename="sorcc-survey.kml")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"KML export failed: {e}")
+    if kismet_files:
+        latest = max(kismet_files, key=lambda f: Path(f).stat().st_mtime)
+        if subprocess.run(["which", "kismetdb_to_kml"], capture_output=True).returncode == 0:
+            result = subprocess.run(["kismetdb_to_kml", "-v", "--in", latest, "--out", output_kml], capture_output=True, text=True, timeout=30)
+            if result.returncode == 0 and Path(output_kml).exists():
+                events.log("export_generated", format="kml", source="kismetdb")
+                return FileResponse(output_kml, media_type="application/vnd.google-earth.kml+xml", filename="sorcc-survey.kml")
+
+    # Fallback: generate KML from GPS-located devices via Kismet API
+    located = _fetch_located_devices_for_cot()
+    if not located:
+        raise HTTPException(status_code=404, detail="No GPS-located devices found. Get a GPS fix outdoors first.")
+    kml = ET.Element("kml", xmlns="http://www.opengis.net/kml/2.2")
+    doc = ET.SubElement(kml, "Document")
+    ET.SubElement(doc, "name").text = "SORCC RF Survey Export"
+    for device, classification in located:
+        pm = ET.SubElement(doc, "Placemark")
+        ET.SubElement(pm, "name").text = device.get("name") or device.get("mac", "Unknown")
+        sig = device.get("signal", 0)
+        pkts = device.get("packets", 0)
+        sig_text = f"{sig} dBm" if sig != 0 else f"{pkts} pkts"
+        desc = f"{classification.get('manufacturer', 'Unknown')} | {sig_text} | {device['phy']} | {device['mac']}"
+        ET.SubElement(pm, "description").text = desc
+        point = ET.SubElement(pm, "Point")
+        ET.SubElement(point, "coordinates").text = f"{device['lon']},{device['lat']},0"
+    tree = ET.ElementTree(kml)
+    tree.write(output_kml, xml_declaration=True, encoding="utf-8")
+    events.log("export_generated", format="kml", source="api", device_count=len(located))
+    return FileResponse(output_kml, media_type="application/vnd.google-earth.kml+xml", filename="sorcc-survey.kml")
 
 
 @app.get("/api/export/csv")
@@ -1029,6 +1061,50 @@ async def export_cot_all():
         events.append(_build_cot_event(device, classification))
 
     xml_bytes = ET.tostring(events, encoding="unicode", xml_declaration=False)
+    xml_out = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_bytes
+    return Response(content=xml_out, media_type="application/xml")
+
+
+@app.get("/api/cot/self")
+async def export_cot_self():
+    """Export CoT XML for the Pi's own position (sensor platform SA).
+
+    Standard ATAK practice: the sensor platform broadcasts its own position
+    so operators can see where the SIGINT payload is on the map.
+    """
+    gps = await get_gps()
+    if not gps.get("lat") or not gps.get("lon"):
+        raise HTTPException(status_code=404, detail="No GPS fix — take Pi outdoors for satellite lock")
+
+    callsign = _get_callsign()
+    now = datetime.now(timezone.utc)
+    stale = now + timedelta(minutes=2)
+    iso_now = now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    iso_stale = stale.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    event = ET.Element("event", {
+        "version": "2.0",
+        "uid": f"SORCC-PLATFORM-{callsign}",
+        "type": "a-f-G-E-S",  # friendly ground electronic sensor
+        "time": iso_now,
+        "start": iso_now,
+        "stale": iso_stale,
+        "how": "m-g",
+    })
+    ET.SubElement(event, "point", {
+        "lat": str(gps["lat"]),
+        "lon": str(gps["lon"]),
+        "hae": str(gps.get("alt") or 0),
+        "ce": "10",
+        "le": "10",
+    })
+    detail = ET.SubElement(event, "detail")
+    ET.SubElement(detail, "contact", callsign=callsign)
+    remarks = ET.SubElement(detail, "remarks")
+    remarks.text = f"SORCC RF Sensor Platform | Source: {gps.get('source', 'unknown')}"
+    ET.SubElement(detail, "__group", name="Blue", role="Team Lead")
+
+    xml_bytes = ET.tostring(event, encoding="unicode", xml_declaration=False)
     xml_out = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_bytes
     return Response(content=xml_out, media_type="application/xml")
 
@@ -1278,7 +1354,7 @@ def _check_source_config():
     return "fail", "No sources configured"
 
 def _check_gps_fix():
-    result = subprocess.run(["mmcli", "-m", "0", "--location-get"], capture_output=True, text=True, timeout=5)
+    result = subprocess.run(["mmcli", "-m", _get_modem_index(), "--location-get"], capture_output=True, text=True, timeout=5)
     lat, lon = None, None
     for line in result.stdout.splitlines():
         line = line.strip().lower()

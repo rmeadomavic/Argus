@@ -53,24 +53,41 @@ sudo bash scripts/sorcc-setup.sh
 ## Dashboard Features
 
 ### Operations
-- **Live View** — Real-time device list with signal strength, MAC, type, packet count
-- **Hunt Mode** — Enter a target SSID, track signal with WARMER/COLDER feedback
+- **Live View** — Real-time device list with signal, MAC, type, packet count; animated stat cards with pulse glow
+- **Hunt Mode** — Track target by SSID or MAC address with WARMER/COLDER feedback (WiFi + Bluetooth)
+- **Spectrum** — Channel utilization chart, band donut, device type donut, signal heatmap
+- **Leaderboard** — Top-8 most active devices with live-updating packet-count bars
+- **Map** — Leaflet map with logarithmic bubble markers, rich popups, GPS breadcrumb trail
+- **Logs** — Structured log viewer with level filter, pause/resume, auto-scroll, auto-retry
+- **Export** — KML for Google Earth, CSV for analysis, with live device/GPS status bar
 - **RF Mission Profiles** — Switch between WiFi Survey, Bluetooth Recon, TPMS, ADS-B, Full Spectrum
-- **Export** — Download KML for Google Earth or CSV for analysis
 
 ### Settings
 - **Config Editor** — Edit all settings from the browser (APN, Kismet sources, GPS, WiFi)
 - **APN Management** — Carrier dropdown with common APNs (T-Mobile, AT&T, Verizon, FirstNet)
 - **Import/Export** — Share configurations between devices
+- **WiFi Capture Toggle** — Switch wlan0 between connectivity and monitor mode from the UI
 
 ### Preflight
-- **Visual Checklist** — Hardware, services, network, and config checks with pass/warn/fail indicators
+- **Visual Checklist** — Hardware, services, network, and config checks with pass/warn/fail/N/A indicators
 - **Auto-refresh** — Continuous monitoring of system health
+- **18 checks** — Disk space, NTP sync, GPS fix, Kismet credentials, adapter conflicts, and more
 
 ### Instructor Overview
 - **Multi-Device View** — Monitor all Pi payloads from a single browser tab
 - **Real-time Status** — Kismet, GPS, LTE, battery, device count per Pi
 - **Access:** `http://<any-pi-ip>:8080/instructor`
+
+### Security
+- **Token Auth** — Optional bearer token for control endpoints; dashboard bypasses via same-origin
+- **TLS Support** — HTTPS available for production deployments
+- **Event Logging** — SHA-256 hash-chained JSONL audit trail for chain-of-custody integrity
+
+### ATAK Integration
+- **CoT Export** — `/api/cot` generates MIL-STD-2525 Cursor-on-Target XML for all GPS-located devices
+- **Self-Position** — `/api/cot/self` broadcasts the Pi's own position as a friendly sensor platform
+- **Per-Device CoT** — `/api/cot/{mac}` for targeting specific devices
+- **Waypoint Export** — `/api/waypoints` generates Mission Planner compatible waypoint files
 
 ## RF Mission Profiles
 
@@ -153,16 +170,42 @@ journalctl -u kismet -f
 sudo systemctl restart sorcc-dashboard
 ```
 
+## API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/status` | GET | System health (Kismet, modem, GPS, battery, Tailscale, device count) |
+| `/api/devices` | GET | All WiFi/BT devices from Kismet |
+| `/api/target/{query}` | GET | Hunt Mode: live RSSI for target SSID or MAC |
+| `/api/gps` | GET | Current GPS position |
+| `/api/activity` | GET | Recent device discoveries, new/min rate |
+| `/api/logs` | GET | Dashboard log entries from ring buffer |
+| `/api/profiles` | GET | List RF mission profiles |
+| `/api/profiles/switch` | POST | Switch active profile |
+| `/api/config/full` | GET/POST | Read/write configuration |
+| `/api/export/kml` | GET | Export as KML (Google Earth) |
+| `/api/export/csv` | GET | Export as CSV |
+| `/api/cot` | GET | CoT XML for all GPS-located devices (ATAK) |
+| `/api/cot/self` | GET | CoT XML for Pi's own position |
+| `/api/cot/{mac}` | GET | CoT XML for a single device |
+| `/api/waypoints` | GET | Mission Planner waypoint file |
+| `/api/wifi-capture/toggle` | POST | Toggle WiFi between connectivity and capture |
+| `/api/preflight` | GET | Run hardware/service checks |
+| `/api/events/history` | GET | Operator event audit trail |
+
+Full OpenAPI schema available at `/docs` when running.
+
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
 | No devices in Live View | Check Kismet: `systemctl status kismet` |
-| LTE not connecting | Verify APN in Settings tab or `sudo mmcli -m 0` |
-| No GPS fix | Move to open sky area, check `sudo mmcli -m 0 --location-get` |
+| LTE not connecting | Verify APN in Settings tab. Modem index auto-detected. |
+| No GPS fix | Move to open sky area, check preflight GPS Fix status |
 | Dashboard not loading | Check: `systemctl status sorcc-dashboard` |
 | SDR not detected | Replug the Nooelec dongle, check `lsusb` |
 | Bluetooth missing | Check `hciconfig` — may need `sudo hciconfig hci0 up` |
+| WiFi capture 0 packets | Onboard brcmfmac is unreliable; use external USB adapter (Alpha cards) |
 
 ## Validation
 
