@@ -73,7 +73,11 @@
 - **Dynamic modem index** — Fixed hardcoded `mmcli -m 0` to auto-detect modem index (was at index 1)
 - **GPS enabled** — NMEA data flowing, no fix indoors (expected)
 - **CoT self-position** — New /api/cot/self endpoint for sensor platform SA in ATAK
-- **Device count:** 751+ (up from 577)
+- **BT classification boost** — 52% "other" → 1% with 30+ name patterns
+- **KML export fix** — Proper coordinates, clear error without GPS
+- **Async status endpoint** — 5x faster (2000ms → 400ms via asyncio.gather)
+- **Async preflight** — Thread pool execution, no longer blocks event loop
+- **Device count:** 850+ (up from 577)
 
 ---
 

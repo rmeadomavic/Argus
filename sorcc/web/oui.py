@@ -166,10 +166,14 @@ _NAME_PATTERNS: list[tuple[str, tuple[str, str]]] = [
     ("playstation", ("Sony", "other")), ("switch", ("Nintendo", "other")),
     # Vehicles
     ("tesla", ("Tesla", "vehicle")),
-    # IoT / Smart Home
+    # IoT / Smart Home / Appliances
     ("ring ", ("Amazon", "iot")), ("wyze", ("Wyze", "iot")),
     ("tuya", ("Tuya", "iot")), ("smartthings", ("Samsung", "iot")),
-    ("hue", ("Philips", "iot")),
+    ("hue", ("Philips", "iot")), ("controller", ("IoT", "iot")),
+    # Printers
+    ("et-", ("Epson", "iot")), ("epson", ("Epson", "iot")),
+    ("hp ", ("HP", "iot")), ("canon", ("Canon", "iot")),
+    ("brother", ("Brother", "iot")),
     # Trackers
     ("tile", ("Tile", "beacon")), ("airtag", ("Apple", "beacon")),
     ("chipolo", ("Chipolo", "beacon")),
