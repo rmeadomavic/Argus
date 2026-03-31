@@ -437,24 +437,73 @@ async def restart_lte():
 
 
 def _wifi_capture_status() -> dict[str, Any]:
-    """Check current wlan0 state: managed (connectivity) vs monitor (capture)."""
-    result: dict[str, Any] = {"active": False, "mode": "unknown", "interface": "wlan0", "adapter": "onboard"}
+    """Check WiFi adapter state including external USB adapter detection."""
+    result: dict[str, Any] = {
+        "active": False, "mode": "unknown", "interface": "wlan0",
+        "adapters": [],  # all detected WiFi interfaces with details
+        "external_ready": False,  # external adapter plugged in and available
+    }
     try:
-        r = subprocess.run(["iw", "dev", "wlan0", "info"], capture_output=True, text=True, timeout=5)
+        # Parse all WiFi interfaces from iw dev
+        r = subprocess.run(["iw", "dev"], capture_output=True, text=True, timeout=5)
+        current_phy = None
+        current_iface: dict[str, str] = {}
         for line in r.stdout.splitlines():
-            if "type" in line:
-                mode = line.strip().split()[-1]
-                result["mode"] = mode
-                result["active"] = mode == "monitor"
-                break
-        # Check if external USB WiFi adapter is available
-        r2 = subprocess.run(["iw", "dev"], capture_output=True, text=True, timeout=5)
-        ifaces = [l.strip().split()[-1] for l in r2.stdout.splitlines() if "Interface" in l]
-        if len(ifaces) > 1:
-            result["adapter"] = "external"
-            result["interfaces"] = ifaces
-        else:
-            result["note"] = "Onboard WiFi (brcmfmac) — external USB adapter recommended for reliable capture"
+            stripped = line.strip()
+            if stripped.startswith("phy#"):
+                if current_iface.get("interface"):
+                    result["adapters"].append(current_iface)
+                current_phy = stripped
+                current_iface = {"phy": current_phy}
+            elif "Interface" in stripped:
+                current_iface["interface"] = stripped.split()[-1]
+            elif stripped.startswith("type"):
+                current_iface["mode"] = stripped.split()[-1]
+            elif stripped.startswith("addr"):
+                current_iface["mac"] = stripped.split()[-1]
+            elif stripped.startswith("ssid"):
+                current_iface["ssid"] = stripped.split(None, 1)[-1]
+            elif stripped.startswith("channel"):
+                current_iface["channel"] = stripped
+        if current_iface.get("interface"):
+            result["adapters"].append(current_iface)
+
+        # Identify each adapter's driver (onboard vs external USB)
+        for adapter in result["adapters"]:
+            iface = adapter.get("interface", "")
+            try:
+                driver_path = f"/sys/class/net/{iface}/device/driver"
+                link = subprocess.run(["readlink", "-f", driver_path], capture_output=True, text=True, timeout=2)
+                driver_name = link.stdout.strip().split("/")[-1] if link.returncode == 0 else ""
+                adapter["driver"] = driver_name
+                adapter["is_onboard"] = driver_name in ("brcmfmac", "brcmsmac")
+                # Check if this adapter supports monitor mode
+                phy = adapter.get("phy", "").replace("phy#", "phy")
+                if phy:
+                    phy_info = subprocess.run(["iw", phy, "info"], capture_output=True, text=True, timeout=3)
+                    adapter["monitor_capable"] = "* monitor" in phy_info.stdout
+                else:
+                    adapter["monitor_capable"] = False
+            except Exception:
+                adapter["driver"] = "unknown"
+                adapter["is_onboard"] = False
+                adapter["monitor_capable"] = False
+
+        # Set primary interface status
+        primary = next((a for a in result["adapters"] if a.get("interface") == "wlan0"), None)
+        if primary:
+            result["mode"] = primary.get("mode", "unknown")
+            result["active"] = primary.get("mode") == "monitor"
+
+        # Check for external (non-onboard) adapters
+        externals = [a for a in result["adapters"] if not a.get("is_onboard")]
+        if externals:
+            result["external_ready"] = True
+            result["external_interface"] = externals[0].get("interface", "")
+            result["external_driver"] = externals[0].get("driver", "")
+            result["note"] = f"External adapter detected: {externals[0].get('interface')} ({externals[0].get('driver')})"
+        elif len(result["adapters"]) <= 1:
+            result["note"] = "No external WiFi adapter — plug in an Alpha/Panda USB adapter for capture"
     except Exception:
         pass
     return result
@@ -666,8 +715,12 @@ async def get_status():
         "tailscale_ip": None, "hostname": None, "uptime": None,
         "device_count": 0, "active_profile": _active_profile,
         "callsign": _get_callsign(),
-        "wifi_capture": _wifi_capture_status()["active"],
+        "wifi_capture": False,
+        "wifi_external": False,
     }
+    _wcap = _wifi_capture_status()
+    status["wifi_capture"] = _wcap.get("active", False)
+    status["wifi_external"] = _wcap.get("external_ready", False)
 
     async def _run(cmd: list[str], timeout: float = 5) -> tuple[str, int]:
         """Run subprocess without blocking the event loop."""
