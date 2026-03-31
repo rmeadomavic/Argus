@@ -640,12 +640,6 @@ async def get_logs(n: int = 100, level: str | None = None):
     return {"count": len(entries), "entries": entries}
 
 
-@app.get("/api/wifi-capture/status")
-async def wifi_capture_status():
-    """Stub — WiFi capture requires an external monitor-mode adapter."""
-    return {"capturing": False, "available": False, "reason": "No monitor-mode adapter detected"}
-
-
 @app.get("/api/gps")
 async def get_gps():
     gps: dict[str, Any] = {"lat": None, "lon": None, "alt": None, "source": None}

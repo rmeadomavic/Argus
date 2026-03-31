@@ -61,7 +61,7 @@ sorcc-pi/
     config_api.py                # Config read/write with file locking
     web/
       __init__.py
-      server.py                  # FastAPI app — routes, middleware (~1100 lines)
+      server.py                  # FastAPI app — routes, middleware (~1100 lines, after stub cleanup)
       kismet.py                  # Kismet REST client — session/response caching
       oui.py                     # OUI manufacturer lookup + BT device classification
       logging_config.py          # Structured logging — rotation, JSON, ring buffer
@@ -69,12 +69,12 @@ sorcc-pi/
         css/
           variables.css          # Design system tokens
           base.css               # Reset, layout, common
-          operations.css         # Live View, Hunt, Export
+          operations.css         # Live View, Hunt, Spectrum, Logs, Export, Leaderboard
           settings.css           # Config editor
           preflight.css          # Preflight checklist
         js/
           app.js                 # SPA nav, status polling, toasts
-          operations.js          # Device list, Hunt Mode, profiles, export
+          operations.js          # Device list, Hunt Mode, profiles, export, log viewer, leaderboard, category donut
           settings.js            # Config editor
           preflight.js           # Preflight checks
           instructor.js          # Multi-device polling (standalone)
@@ -190,6 +190,9 @@ exactly what to do next. Silent failures are unacceptable.
 ### Dashboard
 - FastAPI + Jinja2 templates + vanilla JS SPA
 - Three main tabs: Operations, Settings, Preflight
+- Operations sub-tabs: Live View, Map, Spectrum, Hunt Mode, Logs, Export
+- Live View features: stat cards (animated), activity feed, leaderboard, device list + detail panel
+- Spectrum features: channel utilization chart, band donut, device type donut, signal heatmap
 - Standalone instructor page at `/instructor`
 - SORCC branding: green (#4a7c3f) / black / white / dark theme
 - Design tokens in `variables.css` (follow Hydra's pattern)
