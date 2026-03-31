@@ -1470,6 +1470,57 @@
                     });
             });
         }
+        // Waypoints button
+        var wpBtn = document.getElementById("export-waypoints");
+        if (wpBtn) {
+            wpBtn.addEventListener("click", function () {
+                var btn = this;
+                btn.textContent = "Exporting..."; btn.disabled = true;
+                fetch("/api/waypoints")
+                    .then(function (r) {
+                        if (!r.ok) return r.json().then(function (err) { throw new Error(err.detail || "No located devices"); });
+                        return r.blob();
+                    })
+                    .then(function (blob) {
+                        var url = URL.createObjectURL(blob);
+                        var a = document.createElement("a"); a.href = url;
+                        a.download = "sorcc-hunt-waypoints.waypoints"; a.click();
+                        URL.revokeObjectURL(url);
+                        btn.textContent = "Download Waypoints"; btn.disabled = false;
+                        window.SORCC.showToast("Waypoints export complete", "success");
+                    })
+                    .catch(function (err) {
+                        window.SORCC.showToast("Export failed: " + err.message, "error");
+                        btn.textContent = "Download Waypoints"; btn.disabled = false;
+                    });
+            });
+        }
+
+        // CoT XML button
+        var cotBtn = document.getElementById("export-cot");
+        if (cotBtn) {
+            cotBtn.addEventListener("click", function () {
+                var btn = this;
+                btn.textContent = "Exporting..."; btn.disabled = true;
+                fetch("/api/cot")
+                    .then(function (r) {
+                        if (!r.ok) return r.json().then(function (err) { throw new Error(err.detail || "No located devices"); });
+                        return r.blob();
+                    })
+                    .then(function (blob) {
+                        var url = URL.createObjectURL(blob);
+                        var a = document.createElement("a"); a.href = url;
+                        a.download = "sorcc-cot.xml"; a.click();
+                        URL.revokeObjectURL(url);
+                        btn.textContent = "Download CoT XML"; btn.disabled = false;
+                        window.SORCC.showToast("CoT XML export complete", "success");
+                    })
+                    .catch(function (err) {
+                        window.SORCC.showToast("Export failed: " + err.message, "error");
+                        btn.textContent = "Download CoT XML"; btn.disabled = false;
+                    });
+            });
+        }
     }
 
     // ── WiFi Capture Toggle ────────────────────────────────

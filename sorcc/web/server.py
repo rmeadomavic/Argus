@@ -726,14 +726,46 @@ async def export_csv():
 
 # ── CoT XML Export (ATAK Integration) ────────────────────────────────
 
-def _cot_type_for_category(category: str) -> str:
-    """Map device category to ATAK CoT type code."""
+def _cot_type_for_device(category: str, phy: str) -> str:
+    """Map device category + PHY to MIL-STD-2525 CoT type code for ATAK.
+
+    Type format: a-{affiliation}-G-{battle dimension}-{function}
+    Affiliation: u=unknown, f=friendly, n=neutral, h=hostile
+    Using 'u' (unknown) for all detected devices — operators reclassify in ATAK.
+    """
+    # PHY-specific overrides
+    phy_lower = (phy or "").lower()
+    if "802.11" in phy_lower:
+        # WiFi devices get electronic warfare / signals intelligence codes
+        return {
+            "network": "a-u-G-I-E",       # unknown ground infrastructure electronic
+            "phone":   "a-u-G-U-C-I",     # unknown ground unit civilian individual
+            "laptop":  "a-u-G-U-C-I",     # unknown ground unit civilian individual
+            "other":   "a-u-G-E-S",       # unknown ground electronic sensor
+        }.get(category, "a-u-G-E-S")
+    if "bluetooth" in phy_lower:
+        return {
+            "phone":    "a-u-G-U-C-I",    # unknown ground unit civilian individual
+            "wearable": "a-u-G-U-C-I",    # unknown ground unit civilian individual
+            "laptop":   "a-u-G-U-C-I",    # unknown ground unit civilian individual
+            "speaker":  "a-u-G-I",        # unknown ground infrastructure
+            "vehicle":  "a-u-G-E-V",      # unknown ground electronic vehicle
+            "network":  "a-u-G-I-E",      # unknown ground infrastructure electronic
+            "iot":      "a-u-G-I-E",      # unknown ground infrastructure electronic
+            "tv":       "a-u-G-I",        # unknown ground infrastructure
+        }.get(category, "a-u-G-E")
+    if "rtl433" in phy_lower:
+        return "a-u-G-E-S"                # unknown ground electronic sensor
+    if "adsb" in phy_lower:
+        return "a-u-A"                     # unknown air
+
+    # Fallback by category only
     return {
-        "vehicle": "a-f-G-U-C",      # friendly ground unit combat
-        "beacon":  "a-u-G-I",         # unknown ground infrastructure
-        "network": "a-u-G-I",         # unknown ground infrastructure
-        "iot":     "a-u-G-I",         # unknown ground infrastructure
-    }.get(category, "a-u-G")          # default: unknown ground
+        "phone":   "a-u-G-U-C-I",
+        "vehicle": "a-u-G-E-V",
+        "network": "a-u-G-I-E",
+        "iot":     "a-u-G-I-E",
+    }.get(category, "a-u-G")
 
 
 def _build_cot_event(device: dict, classification: dict) -> ET.Element:
@@ -745,7 +777,7 @@ def _build_cot_event(device: dict, classification: dict) -> ET.Element:
     iso_now = now.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     iso_stale = stale.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
-    cot_type = _cot_type_for_category(classification.get("category", "other"))
+    cot_type = _cot_type_for_device(classification.get("category", "other"), device.get("phy", ""))
 
     event = ET.Element("event", {
         "version": "2.0",
@@ -766,16 +798,35 @@ def _build_cot_event(device: dict, classification: dict) -> ET.Element:
     })
 
     detail = ET.SubElement(event, "detail")
-    ET.SubElement(detail, "contact", callsign=f"SORCC-{short_mac}")
 
-    dev_type = device.get("phy", "Unknown")
-    manufacturer = classification.get("manufacturer", "Unknown")
+    # Build a meaningful callsign: manufacturer + short MAC
+    mfr = classification.get("manufacturer", "")
+    callsign_parts = []
+    if mfr and mfr != "Random BLE" and mfr != "Unknown":
+        callsign_parts.append(mfr[:12])
+    callsign_parts.append(short_mac)
+    ET.SubElement(detail, "contact", callsign="-".join(callsign_parts))
+
+    # Remarks with full device context
+    phy_label = device.get("phy", "Unknown")
+    category = classification.get("category", "other")
     packets = device.get("packets", 0)
-    signal = device.get("signal", -100)
+    signal = device.get("signal", 0)
+    sig_text = f"{signal} dBm" if signal != 0 else f"{packets} pkts"
     remarks = ET.SubElement(detail, "remarks")
-    remarks.text = f"{dev_type} | {manufacturer} | {packets} pkts | Signal: {signal} dBm"
+    remarks.text = f"[{phy_label}] {mfr or 'Unknown'} ({category}) | {sig_text} | {packets} pkts"
 
-    ET.SubElement(detail, "__group", name="Cyan", role="Team Member")
+    # Color-code by PHY type in ATAK
+    phy_lower = (device.get("phy", "")).lower()
+    if "802.11" in phy_lower:
+        group_color, group_role = "Green", "HQ"
+    elif "bluetooth" in phy_lower:
+        group_color, group_role = "Cyan", "Team Member"
+    elif "rtl433" in phy_lower:
+        group_color, group_role = "Yellow", "Team Member"
+    else:
+        group_color, group_role = "White", "Team Member"
+    ET.SubElement(detail, "__group", name=group_color, role=group_role)
 
     return event
 
@@ -851,6 +902,42 @@ async def export_cot_device(mac: str):
             return Response(content=xml_out, media_type="application/xml")
 
     raise HTTPException(status_code=404, detail=f"Device {mac} not found or has no GPS coordinates")
+
+
+@app.get("/api/waypoints")
+async def export_waypoints():
+    """Export GPS-located devices as QGC WPL 110 waypoint file (Mission Planner compatible).
+
+    Each located device becomes a waypoint. Useful for autonomous hunt missions:
+    fly to each device's last-known position for signal convergence.
+    """
+    located = _fetch_located_devices_for_cot()
+    if not located:
+        raise HTTPException(status_code=404, detail="No devices with GPS coordinates found")
+
+    # Sort by signal strength (strongest first) for prioritized investigation
+    located.sort(key=lambda x: x[0].get("signal", -999), reverse=True)
+
+    lines = ["QGC WPL 110"]
+    # Line 0: home position (first waypoint or 0,0)
+    home_lat = located[0][0].get("lat", 0)
+    home_lon = located[0][0].get("lon", 0)
+    # seq  current  frame  cmd  p1  p2  p3  p4  lat  lon  alt  autocontinue
+    lines.append(f"0\t1\t0\t16\t0\t0\t0\t0\t{home_lat:.8f}\t{home_lon:.8f}\t50.0\t1")
+
+    for i, (device, classification) in enumerate(located, start=1):
+        lat = device.get("lat", 0)
+        lon = device.get("lon", 0)
+        alt = 50.0  # Default loiter altitude in meters
+        # MAV_CMD_NAV_WAYPOINT (16), loiter 5s at each target
+        lines.append(f"{i}\t0\t3\t16\t5.0\t0\t0\t0\t{lat:.8f}\t{lon:.8f}\t{alt:.1f}\t1")
+
+    content = "\n".join(lines) + "\n"
+    return Response(
+        content=content,
+        media_type="text/plain",
+        headers={"Content-Disposition": "attachment; filename=sorcc-hunt-waypoints.waypoints"},
+    )
 
 
 @app.get("/api/config/full")
