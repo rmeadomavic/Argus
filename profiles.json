@@ -50,6 +50,18 @@
       "icon": "plane"
     },
     {
+      "id": "fpv-detection",
+      "name": "FPV Detection",
+      "description": "Detect FPV drone control links — 915 MHz CRSF/ELRS, 868 MHz EU, BT for telemetry",
+      "kismet_sources": {
+        "bluetooth": "hci0",
+        "wifi": null,
+        "rtl433": "rtl433-0:channel=915000000",
+        "adsb": null
+      },
+      "icon": "drone"
+    },
+    {
       "id": "full-spectrum",
       "name": "Full Spectrum",
       "description": "All sources active — WiFi, Bluetooth, SDR, ADS-B",

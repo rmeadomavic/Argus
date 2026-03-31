@@ -978,12 +978,16 @@
     var WIFI_CHANNELS_5 = {36:5180,40:5200,44:5220,48:5240,52:5260,56:5280,60:5300,64:5320,100:5500,104:5520,108:5540,112:5560,116:5580,120:5600,124:5620,128:5640,132:5660,136:5680,140:5700,144:5720,149:5745,153:5765,157:5785,161:5805,165:5825};
 
     var BAND_DEFS = [
-        { id: "2.4ghz", label: "2.4 GHz WiFi", color: "#4ade80", min: 2400, max: 2500 },
-        { id: "5ghz",   label: "5 GHz WiFi",   color: "#42a5f5", min: 5150, max: 5850 },
-        { id: "bt",     label: "Bluetooth",     color: "#a78bfa", min: 2402, max: 2480, phyMatch: "bluetooth" },
-        { id: "433mhz", label: "433 MHz ISM",   color: "#f59e0b", min: 430, max: 440 },
-        { id: "adsb",   label: "1090 ADS-B",    color: "#ef5350", min: 1088, max: 1092 },
-        { id: "other",  label: "Other",         color: "#6b7280", min: 0, max: 0 }
+        { id: "2.4ghz",  label: "2.4 GHz WiFi",     color: "#4ade80", min: 2400, max: 2500 },
+        { id: "5ghz",    label: "5 GHz WiFi",        color: "#42a5f5", min: 5150, max: 5850 },
+        { id: "bt",      label: "Bluetooth",          color: "#a78bfa", min: 2402, max: 2480, phyMatch: "bluetooth" },
+        { id: "433mhz",  label: "433 MHz ISM/TPMS",  color: "#f59e0b", min: 430, max: 440 },
+        { id: "868mhz",  label: "868 MHz (EU CRSF)",  color: "#f97316", min: 863, max: 870 },
+        { id: "915mhz",  label: "915 MHz (FPV/LoRa)", color: "#fb923c", min: 902, max: 928 },
+        { id: "adsb",    label: "1090 ADS-B",         color: "#ef5350", min: 1088, max: 1092 },
+        { id: "2.4elrs", label: "2.4 GHz ELRS/FPV",  color: "#22d3ee", min: 2400, max: 2500, phyMatch: "elrs" },
+        { id: "5.8fpv",  label: "5.8 GHz FPV Video", color: "#e879f9", min: 5650, max: 5950 },
+        { id: "other",   label: "Other",              color: "#6b7280", min: 0, max: 0 }
     ];
 
     function classifyBand(device) {
@@ -1003,6 +1007,9 @@
         var mhz = freq > 100000 ? freq / 1000 : freq;
         if (mhz >= 2400 && mhz <= 2500) return "2.4ghz";
         if (mhz >= 5150 && mhz <= 5850) return "5ghz";
+        if (mhz >= 5650 && mhz <= 5950) return "5.8fpv";
+        if (mhz >= 902 && mhz <= 928) return "915mhz";
+        if (mhz >= 863 && mhz <= 870) return "868mhz";
         if (mhz >= 430 && mhz <= 440) return "433mhz";
         if (mhz >= 1088 && mhz <= 1092) return "adsb";
         if (mhz > 0) return "other";
@@ -1027,9 +1034,12 @@
         var svg = document.getElementById("channel-chart");
         if (!svg) return;
 
-        // Count devices per channel (WiFi only)
+        // Count devices per channel — prefer WiFi, fall back to BT activity
         var channelCounts = {};
         var channelSignals = {};
+        var chartMode = "wifi";
+
+        // Try WiFi channels first
         devices.forEach(function (d) {
             var ch = d.channel;
             if (!ch) return;
@@ -1040,17 +1050,43 @@
             if (d.signal && d.signal !== 0) channelSignals[ch].push(d.signal);
         });
 
-        // Sort channels numerically
-        var channels = Object.keys(channelCounts).sort(function (a, b) {
-            return parseInt(a, 10) - parseInt(b, 10);
-        });
+        // If no WiFi data, show BT device activity by category instead
+        if (Object.keys(channelCounts).length === 0) {
+            chartMode = "bt";
+            var catCounts = {};
+            devices.forEach(function (d) {
+                var cat = d.category || "other";
+                catCounts[cat] = (catCounts[cat] || 0) + 1;
+            });
+            channelCounts = catCounts;
+        }
+
+        // Sort channels numerically, or categories by count
+        var channels;
+        if (chartMode === "wifi") {
+            channels = Object.keys(channelCounts).sort(function (a, b) {
+                return parseInt(a, 10) - parseInt(b, 10);
+            });
+        } else {
+            channels = Object.keys(channelCounts).sort(function (a, b) {
+                return channelCounts[b] - channelCounts[a];
+            });
+        }
 
         var badge = document.getElementById("spec-ch-count");
-        if (badge) badge.textContent = channels.length + " channels";
+        if (badge) {
+            badge.textContent = chartMode === "wifi"
+                ? channels.length + " channels"
+                : devices.length + " BT devices";
+        }
 
         if (channels.length === 0) {
-            svg.innerHTML = '<text x="360" y="100" text-anchor="middle" fill="var(--text-dim)" font-size="14" font-family="var(--font-mono)">No WiFi channels detected</text>' +
-                '<text x="360" y="125" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-family="var(--font-sans)">Enable WiFi Capture on the Live View tab to see channel data</text>';
+            svg.textContent = "";
+            var noData = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            noData.setAttribute("x", "360"); noData.setAttribute("y", "100");
+            noData.setAttribute("text-anchor", "middle"); noData.setAttribute("fill", "var(--text-dim)");
+            noData.setAttribute("font-size", "14"); noData.textContent = "No devices detected yet";
+            svg.appendChild(noData);
             return;
         }
 
@@ -1061,7 +1097,8 @@
         var padL = 40, padR = 10, padT = 10, padB = 30;
         var chartW = W - padL - padR;
         var chartH = H - padT - padB;
-        var barW = Math.min(32, Math.floor(chartW / channels.length) - 4);
+        var maxBarW = chartMode === "bt" ? 60 : 32;
+        var barW = Math.min(maxBarW, Math.floor(chartW / channels.length) - 4);
         var gap = (chartW - barW * channels.length) / (channels.length + 1);
 
         var html = '';
@@ -1094,8 +1131,9 @@
             if (barH > 16) {
                 html += '<text x="' + (x + barW / 2) + '" y="' + (y + 14) + '" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="var(--font-mono)">' + count + '</text>';
             }
-            // Channel label
-            html += '<text x="' + (x + barW / 2) + '" y="' + (H - 8) + '" text-anchor="middle" fill="var(--text-secondary)" font-size="10" font-family="var(--font-mono)">Ch' + ch + '</text>';
+            // Channel/category label
+            var label = chartMode === "wifi" ? "Ch" + ch : ch.charAt(0).toUpperCase() + ch.slice(1);
+            html += '<text x="' + (x + barW / 2) + '" y="' + (H - 8) + '" text-anchor="middle" fill="var(--text-secondary)" font-size="' + (chartMode === "wifi" ? "10" : "9") + '" font-family="var(--font-mono)">' + label + '</text>';
         });
 
         // Blur filter definition
@@ -1645,6 +1683,8 @@
         var btnEl = document.getElementById("wifi-capture-toggle");
         var btnText = document.getElementById("wifi-capture-btn-text");
         var warningEl = document.getElementById("wifi-capture-warning");
+        var adapterEl = document.getElementById("wifi-adapter-info");
+        var escapeHtml = window.SORCC.escapeHtml;
         if (!statusEl || !btnEl) return;
 
         btnEl.disabled = false;
@@ -1656,11 +1696,44 @@
             btnEl.className = "wifi-capture-btn capturing";
             warningEl.style.display = "none";
         } else {
-            statusEl.textContent = "Capture OFF \u2014 WiFi normal, LTE active";
+            statusEl.textContent = "Capture OFF";
             statusEl.className = "wifi-capture-status inactive";
             btnText.textContent = "Enable Monitor Mode";
             btnEl.className = "wifi-capture-btn wifi-capture-warn";
             warningEl.style.display = "none";
+        }
+
+        // Show adapter detection info
+        if (adapterEl) {
+            var adapters = data.adapters || [];
+            var externals = adapters.filter(function (a) { return !a.is_onboard; });
+            var onboard = adapters.filter(function (a) { return a.is_onboard; });
+
+            adapterEl.textContent = "";
+            if (externals.length > 0) {
+                var ext = externals[0];
+                var badge = document.createElement("span");
+                badge.className = "adapter-badge adapter-external";
+                badge.textContent = (ext.interface || "?") + " (" + (ext.driver || "USB") + ") \u2014 Ready for capture";
+                adapterEl.appendChild(badge);
+                if (onboard.length > 0 && !data.active) {
+                    var ob = document.createElement("span");
+                    ob.className = "adapter-badge adapter-onboard";
+                    ob.textContent = (onboard[0].interface || "wlan0") + " \u2014 connectivity";
+                    adapterEl.appendChild(document.createTextNode(" "));
+                    adapterEl.appendChild(ob);
+                }
+            } else if (onboard.length > 0) {
+                var solo = document.createElement("span");
+                solo.className = "adapter-badge adapter-onboard-only";
+                solo.textContent = "Onboard only (brcmfmac) \u2014 plug in USB adapter for capture";
+                adapterEl.appendChild(solo);
+            } else {
+                var none = document.createElement("span");
+                none.className = "adapter-badge adapter-none";
+                none.textContent = "No WiFi adapters detected";
+                adapterEl.appendChild(none);
+            }
         }
     }
 

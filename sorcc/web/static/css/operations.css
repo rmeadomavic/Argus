@@ -352,6 +352,45 @@
     font-weight: 600;
 }
 
+.wifi-adapter-info {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.adapter-badge {
+    font-size: var(--font-xs);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.adapter-badge.adapter-external {
+    background: rgba(46, 204, 113, 0.15);
+    color: #2ecc71;
+    border: 1px solid rgba(46, 204, 113, 0.3);
+}
+
+.adapter-badge.adapter-onboard {
+    background: rgba(52, 152, 219, 0.15);
+    color: #3498db;
+    border: 1px solid rgba(52, 152, 219, 0.3);
+}
+
+.adapter-badge.adapter-onboard-only {
+    background: rgba(243, 156, 18, 0.12);
+    color: var(--signal-warm);
+    border: 1px solid rgba(243, 156, 18, 0.25);
+}
+
+.adapter-badge.adapter-none {
+    background: rgba(231, 76, 60, 0.12);
+    color: var(--signal-cold);
+    border: 1px solid rgba(231, 76, 60, 0.25);
+}
+
 /* ── Sub-Tab Navigation ── */
 .sub-tabs {
     display: flex;
