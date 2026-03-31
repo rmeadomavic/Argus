@@ -47,6 +47,19 @@
     color: var(--text-dim);
 }
 
+/* Stat card pulse animation on value change */
+@keyframes stat-pulse-glow {
+    0%   { box-shadow: 0 0 0 0 rgba(56, 87, 35, 0.5); border-color: var(--sorcc-green); }
+    50%  { box-shadow: 0 0 16px 4px rgba(56, 87, 35, 0.25); }
+    100% { box-shadow: none; border-color: var(--card-border); }
+}
+.stat-card.stat-pulse {
+    animation: stat-pulse-glow 0.6s ease-out;
+}
+.stat-card.stat-pulse .stat-card-value {
+    color: var(--sorcc-light);
+}
+
 /* ── Activity Feed ── */
 .activity-feed {
     background: var(--bg-panel-gradient);

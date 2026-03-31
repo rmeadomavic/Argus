@@ -168,22 +168,51 @@
         if (newEl) newEl.textContent = newPerMinute > 0 ? "+" + newPerMinute : "--";
     }
 
+    // Animated count-up with easing + pulse glow on change
+    var statAnimations = {};  // id → current animation frame
+
     function setStatValue(id, value) {
         var el = document.getElementById(id);
         if (!el) return;
         var current = parseInt(el.textContent, 10);
-        if (isNaN(current) || current === value) {
-            el.textContent = value;
-            return;
+        if (isNaN(current)) current = 0;
+        if (current === value) return;
+
+        // Cancel any running animation for this element
+        if (statAnimations[id]) {
+            cancelAnimationFrame(statAnimations[id]);
+            statAnimations[id] = null;
         }
-        // Animate the number change
-        el.textContent = value;
-        el.style.transform = "scale(1.15)";
-        el.style.color = "var(--sorcc-muted)";
-        setTimeout(function () {
-            el.style.transform = "";
-            el.style.color = "";
-        }, 200);
+
+        // Pulse the card on change
+        var card = el.closest(".stat-card");
+        if (card) {
+            card.classList.remove("stat-pulse");
+            void card.offsetWidth; // force reflow to restart animation
+            card.classList.add("stat-pulse");
+        }
+
+        // Animate count from current → value
+        var start = current;
+        var diff = value - start;
+        var duration = Math.min(600, Math.max(200, Math.abs(diff) * 3));
+        var startTime = null;
+
+        function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+        function step(ts) {
+            if (!startTime) startTime = ts;
+            var progress = Math.min(1, (ts - startTime) / duration);
+            var eased = easeOutCubic(progress);
+            el.textContent = Math.round(start + diff * eased);
+            if (progress < 1) {
+                statAnimations[id] = requestAnimationFrame(step);
+            } else {
+                el.textContent = value;
+                statAnimations[id] = null;
+            }
+        }
+        statAnimations[id] = requestAnimationFrame(step);
     }
 
     var signalHistoryLastSeen = {};  // MAC → timestamp of last update
@@ -822,6 +851,7 @@
         if (activeSubTab !== "spectrum") return;
         renderChannelChart(devices);
         renderBandDonut(devices);
+        renderCategoryDonut(devices);
         renderSignalHeatmap(devices);
     }
 
