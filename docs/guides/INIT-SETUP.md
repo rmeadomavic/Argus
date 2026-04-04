@@ -1,6 +1,6 @@
 # SORCC-PI — One-Time Environment Setup
 
-Run these steps once per device (Pi or Jetson). After this, use `SESSION-START.md` for each dev session.
+Run these steps once per Pi. After this, use `SESSION-START.md` for each dev session.
 
 ---
 
@@ -60,7 +60,6 @@ tailscale ip -4
 cd ~
 gh repo clone rmeadomavic/SORCC-PI
 cd SORCC-PI
-git checkout claude/setup-sorcc-pi-qxVWN
 ```
 
 ## 6. Run the SORCC Installer (Pi only)
@@ -119,12 +118,6 @@ claude --version
 - Kismet port: 2501
 - Passwords: `kismet` or `sorcc`
 - GPS: needs `mmcli --location-enable-gps-nmea --location-enable-gps-raw` (done by boot service)
-
-### Jetson Orin Nano
-- OS: JetPack (Ubuntu-based)
-- Hydra dashboard: typically port 8080
-- Different service names — check Hydra docs
-- More compute available — can run heavier ML models
 
 ---
 
