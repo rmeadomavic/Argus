@@ -125,7 +125,13 @@ def write_config(updates: dict[str, dict[str, str]]) -> dict[str, Any]:
             old_value = config.get(section, key)
             if old_value != value:
                 config.set(section, key, value)
-                logger.info("CONFIG WRITE: %s.%s = %s", section, key, value)
+                # Regression guard: never log plaintext secrets from REDACTED_FIELDS.
+                logged_value = (
+                    REDACTED_VALUE
+                    if key in REDACTED_FIELDS.get(section, set())
+                    else value
+                )
+                logger.info("CONFIG WRITE: %s.%s = %s", section, key, logged_value)
                 # Check if restart required
                 if (
                     section in RESTART_REQUIRED_FIELDS
