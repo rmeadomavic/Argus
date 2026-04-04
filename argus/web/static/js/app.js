@@ -1,4 +1,4 @@
-/* SORCC-PI Dashboard — Main SPA Controller */
+/* Argus Dashboard — Main SPA Controller */
 
 (function () {
     "use strict";
@@ -250,7 +250,7 @@
 
     // ── Export to global namespace ──────────────────────────
 
-    window.SORCC = {
+    window.ARGUS = {
         showToast: showToast,
         escapeHtml: escapeHtml,
         signalToPercent: signalToPercent,

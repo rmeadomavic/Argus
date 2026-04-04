@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SORCC Login</title>
+    <title>Argus Login</title>
     <link rel="stylesheet" href="/static/css/variables.css">
     <link rel="stylesheet" href="/static/css/base.css">
     <style>
@@ -24,7 +24,7 @@
             font-size: var(--font-xl);
             font-weight: 900;
             color: var(--text-bright);
-            background: var(--sorcc-green);
+            background: var(--argus-green);
             display: inline-block;
             padding: var(--sp-2) var(--sp-4);
             border-radius: var(--radius-md);
@@ -51,12 +51,12 @@
         }
         .login-input:focus {
             outline: none;
-            border-color: var(--sorcc-green);
+            border-color: var(--argus-green);
         }
         .login-btn {
             width: 100%;
             padding: var(--sp-4);
-            background: var(--sorcc-green);
+            background: var(--argus-green);
             color: white;
             border: none;
             border-radius: var(--radius-md);
@@ -65,7 +65,7 @@
             cursor: pointer;
             transition: background var(--transition-normal);
         }
-        .login-btn:hover { background: var(--sorcc-green-light); }
+        .login-btn:hover { background: var(--argus-green-light); }
         .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .login-error {
             color: var(--danger);
@@ -85,7 +85,7 @@
 </head>
 <body>
     <div class="login-card">
-        <div class="login-logo">SORCC</div>
+        <div class="login-logo">ARGUS</div>
         <div class="login-title">RF Survey Dashboard</div>
         <div class="login-error" id="login-error">Wrong password</div>
         <form id="login-form">

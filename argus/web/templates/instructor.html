@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SORCC Instructor Overview</title>
+    <title>Argus Instructor Overview</title>
     <style>
         /* ── Design Tokens (inline to keep standalone) ── */
         :root {
-            --sorcc-green: #4a7c3f;
-            --sorcc-green-dark: #385723;
-            --sorcc-green-light: #5a9c4f;
-            --sorcc-muted: #A6BC92;
+            --argus-green: #4a7c3f;
+            --argus-green-dark: #385723;
+            --argus-green-light: #5a9c4f;
+            --argus-muted: #A6BC92;
             --bg-dark: #1a1a1a;
             --bg-panel: #2a2a2a;
             --bg-input: #333;
@@ -43,12 +43,12 @@
 
         /* ── Header ── */
         header {
-            background: var(--sorcc-green-dark);
+            background: var(--argus-green-dark);
             padding: 12px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 3px solid var(--sorcc-green);
+            border-bottom: 3px solid var(--argus-green);
         }
 
         .header-left {
@@ -61,7 +61,7 @@
             font-size: 1.2rem;
             font-weight: 900;
             color: var(--text-bright);
-            background: var(--sorcc-green);
+            background: var(--argus-green);
             padding: 4px 10px;
             border-radius: 4px;
             letter-spacing: 2px;
@@ -96,7 +96,7 @@
         }
 
         .add-bar input::placeholder { color: var(--text-dim); }
-        .add-bar input:focus { outline: none; border-color: var(--sorcc-green); }
+        .add-bar input:focus { outline: none; border-color: var(--argus-green); }
 
         .btn {
             border: none;
@@ -108,11 +108,11 @@
         }
 
         .btn-primary {
-            background: var(--sorcc-green);
+            background: var(--argus-green);
             color: white;
         }
 
-        .btn-primary:hover { background: var(--sorcc-green-light); }
+        .btn-primary:hover { background: var(--argus-green-light); }
 
         .btn-secondary {
             background: var(--bg-input);
@@ -143,7 +143,7 @@
             transition: border-color 0.2s;
         }
 
-        .pi-card.online { border-color: var(--sorcc-green); }
+        .pi-card.online { border-color: var(--argus-green); }
         .pi-card.offline { border-color: var(--signal-cold); opacity: 0.7; }
 
         .pi-card-header {
@@ -163,7 +163,7 @@
 
         .pi-card-callsign {
             font-size: 0.75rem;
-            color: var(--sorcc-muted);
+            color: var(--argus-muted);
             font-weight: 600;
             letter-spacing: 0.05em;
         }
@@ -241,14 +241,14 @@
 
         .pi-card-profile {
             font-size: 0.75rem;
-            color: var(--sorcc-muted);
+            color: var(--argus-muted);
             margin-bottom: 10px;
         }
 
         .pi-card-link {
             display: block;
             text-align: center;
-            background: var(--sorcc-green);
+            background: var(--argus-green);
             color: white;
             padding: 8px;
             border-radius: var(--radius-md);
@@ -259,7 +259,7 @@
         }
 
         .pi-card-link:hover {
-            background: var(--sorcc-green-light);
+            background: var(--argus-green-light);
             text-decoration: none;
         }
 
@@ -300,7 +300,7 @@
         }
 
         .footer-classification {
-            color: var(--sorcc-muted);
+            color: var(--argus-muted);
             font-weight: 700;
             letter-spacing: 0.05em;
         }
@@ -322,14 +322,14 @@
     <!-- ── Header ── -->
     <header>
         <div class="header-left">
-            <div class="logo-text">SORCC</div>
+            <div class="logo-text">ARGUS</div>
             <h1>Instructor Overview</h1>
         </div>
     </header>
 
     <!-- ── Add Device Bar ── -->
     <div class="add-bar">
-        <input type="text" id="device-input" placeholder="Enter Pi IP or hostname (e.g., 192.168.1.10, sorcc-pi-01)">
+        <input type="text" id="device-input" placeholder="Enter Pi IP or hostname (e.g., 192.168.1.10, argus-pi-01)">
         <button class="btn btn-primary" id="btn-add-device">Add Device</button>
         <button class="btn btn-secondary" id="btn-add-bulk">Add Bulk (comma-separated)</button>
     </div>
@@ -345,7 +345,7 @@
     <!-- ── Footer ── -->
     <footer>
         <span class="footer-classification">UNCLASSIFIED</span>
-        <span>SORCC Instructor Overview</span>
+        <span>Argus — SORCC Instructor Overview</span>
     </footer>
 
     <script>
@@ -353,7 +353,7 @@
         "use strict";
 
         var POLL_INTERVAL = 2000;
-        var STORAGE_KEY = "sorcc-instructor-devices";
+        var STORAGE_KEY = "argus-instructor-devices";
         var devices = [];
         var pollTimers = {};
 

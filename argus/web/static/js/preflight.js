@@ -1,4 +1,4 @@
-/* SORCC-PI Dashboard — Preflight Tab Controller */
+/* Argus Dashboard — Preflight Tab Controller */
 
 (function () {
     "use strict";
@@ -14,8 +14,8 @@
         "PiSugar Battery":   { indicator: "chk-battery",     detail: "chk-battery-detail",     cardStatus: "hw-status" },
         // Services
         "Kismet":            { indicator: "chk-kismet",      detail: "chk-kismet-detail",      cardStatus: "svc-status" },
-        "sorcc-dashboard":   { indicator: "chk-dashboard",   detail: "chk-dashboard-detail",   cardStatus: "svc-status" },
-        "sorcc-boot":        { indicator: "chk-boot-svc",    detail: "chk-boot-svc-detail",    cardStatus: "svc-status" },
+        "argus-dashboard":   { indicator: "chk-dashboard",   detail: "chk-dashboard-detail",   cardStatus: "svc-status" },
+        "argus-boot":        { indicator: "chk-boot-svc",    detail: "chk-boot-svc-detail",    cardStatus: "svc-status" },
         "avahi-daemon":      { indicator: "chk-avahi",       detail: "chk-avahi-detail",       cardStatus: "svc-status" },
         // Network
         "LTE Modem":         { indicator: "chk-lte",         detail: "chk-lte-detail",         cardStatus: "net-status" },
@@ -76,7 +76,7 @@
                 if (indicator) indicator.style.display = "none";
             })
             .catch(function (err) {
-                window.SORCC.showToast("Preflight check failed: " + err.message, "error");
+                window.ARGUS.showToast("Preflight check failed: " + err.message, "error");
                 if (indicator) indicator.style.display = "none";
                 // Reset stuck "Checking..." indicators to show failure
                 Object.keys(checkMapping).forEach(function (name) {

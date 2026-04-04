@@ -1,4 +1,4 @@
-/* SORCC Settings Tab — Configuration Editor */
+/* Argus Settings Tab — Configuration Editor */
 
 /* ── Settings Layout ── */
 .settings-layout {
@@ -43,9 +43,9 @@
 }
 
 .settings-nav-btn.active {
-    color: var(--sorcc-light);
+    color: var(--argus-light);
     background: rgba(56, 87, 35, 0.15);
-    border-left-color: var(--sorcc-green);
+    border-left-color: var(--argus-green);
 }
 
 /* ── Section Content (Right Panel) ── */
@@ -108,7 +108,7 @@
 .form-group input:focus,
 .form-group select:focus {
     outline: none;
-    border-color: var(--sorcc-green);
+    border-color: var(--argus-green);
     box-shadow: var(--glow-green);
 }
 
@@ -210,7 +210,7 @@
 
     .settings-nav-btn.active {
         border-left-color: transparent;
-        border-bottom-color: var(--sorcc-green);
+        border-bottom-color: var(--argus-green);
     }
 
     .settings-actions {

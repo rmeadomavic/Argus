@@ -1,10 +1,10 @@
-/* SORCC-PI Dashboard — Instructor Overview Controller (Standalone) */
+/* Argus Dashboard — Instructor Overview Controller (Standalone) */
 
 (function () {
     "use strict";
 
     // ── Constants ────────────────────────────────────────────
-    var STORAGE_KEY = "sorcc-instructor-devices";
+    var STORAGE_KEY = "argus-instructor-devices";
     var POLL_INTERVAL = 2000;
     var FETCH_TIMEOUT = 3000;
     var DASHBOARD_PORT = 8080;

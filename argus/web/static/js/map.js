@@ -1,4 +1,4 @@
-/* SORCC-PI Dashboard — Map View Controller (Enhanced) */
+/* Argus Dashboard — Map View Controller (Enhanced) */
 
 (function () {
     "use strict";
@@ -18,7 +18,7 @@
     var satelliteLayer = null;
     var isSatellite = false;
 
-    // Default center — Fort Campbell area (SORCC home base)
+    // Default center — Fort Campbell area (Argus home base)
     var DEFAULT_LAT = 36.6636;
     var DEFAULT_LON = -87.4731;
     var DEFAULT_ZOOM = 13;
@@ -59,7 +59,7 @@
 
         fixLeafletIcons();
 
-        map = L.map("sorcc-map", {
+        map = L.map("argus-map", {
             center: [DEFAULT_LAT, DEFAULT_LON],
             zoom: DEFAULT_ZOOM,
             zoomControl: true
@@ -218,7 +218,7 @@
                 }
 
                 positionMarker.bindPopup(
-                    "<b>SORCC Payload</b><br>" +
+                    "<b>Argus Payload</b><br>" +
                     "Lat: " + gps.lat.toFixed(6) + "<br>" +
                     "Lon: " + gps.lon.toFixed(6) + "<br>" +
                     "Alt: " + (gps.alt ? gps.alt.toFixed(1) + "m" : "N/A") + "<br>" +
@@ -337,11 +337,11 @@
     }
 
     function escapeForPopup(str) {
-        return str ? window.SORCC.escapeHtml(str) : "";
+        return str ? window.ARGUS.escapeHtml(str) : "";
     }
 
     function pollMap() {
-        if (window.SORCC.getActiveTab() !== "operations") return;
+        if (window.ARGUS.getActiveTab() !== "operations") return;
         updateMapPosition();
         updateMapDevices();
     }
@@ -376,8 +376,8 @@
         }
 
         // Expose centerMap for cross-module use (device detail → map)
-        if (window.SORCC) {
-            window.SORCC.centerMap = function (lat, lon) {
+        if (window.ARGUS) {
+            window.ARGUS.centerMap = function (lat, lon) {
                 if (!mapInitialized) initMap();
                 if (map) {
                     map.setView([lat, lon], 18);

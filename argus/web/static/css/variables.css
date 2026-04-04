@@ -1,12 +1,12 @@
-/* SORCC Design System — RF Survey Dashboard (Hydra-aligned) */
+/* Argus Design System — RF Survey Dashboard (Hydra-aligned) */
 :root {
     /* ── Brand Greens (from Hydra) ── */
-    --sorcc-green: #385723;
-    --sorcc-green-dark: #2a4118;
-    --sorcc-green-light: #5a9c4f;
-    --sorcc-muted: #A6BC92;
-    --sorcc-warm: #D8E2D0;
-    --sorcc-light: #EFF5EB;
+    --argus-green: #385723;
+    --argus-green-dark: #2a4118;
+    --argus-green-light: #5a9c4f;
+    --argus-muted: #A6BC92;
+    --argus-warm: #D8E2D0;
+    --argus-light: #EFF5EB;
 
     /* ── Dark Base (deeper blacks from Hydra) ── */
     --bg-dark: #0c0c0c;

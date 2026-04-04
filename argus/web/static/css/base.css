@@ -1,4 +1,4 @@
-/* SORCC Base Styles — Hydra-aligned Dark Theme */
+/* Argus Base Styles — Hydra-aligned Dark Theme */
 
 /* ── CSS Reset ── */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -20,7 +20,7 @@ body {
     overflow-x: hidden;
 }
 
-a { color: var(--sorcc-muted); text-decoration: none; }
+a { color: var(--argus-muted); text-decoration: none; }
 a:hover { text-decoration: underline; }
 img { max-width: 100%; display: block; }
 input, select, textarea, button { font-family: inherit; font-size: inherit; }
@@ -43,7 +43,7 @@ header {
     position: sticky;
     top: 0;
     height: var(--topbar-height);
-    background: linear-gradient(135deg, var(--sorcc-green) 0%, var(--sorcc-green-dark) 60%, #1e3312 100%);
+    background: linear-gradient(135deg, var(--argus-green) 0%, var(--argus-green-dark) 60%, #1e3312 100%);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -64,7 +64,7 @@ header {
     font-family: var(--font-heading);
     font-size: var(--font-lg);
     font-weight: 900;
-    color: var(--sorcc-light);
+    color: var(--argus-light);
     letter-spacing: var(--ls-condensed);
     text-transform: uppercase;
     user-select: none;
@@ -204,9 +204,9 @@ header h1 {
 }
 
 .tab.active {
-    background: var(--sorcc-green);
-    color: var(--sorcc-light);
-    border-color: var(--sorcc-green);
+    background: var(--argus-green);
+    color: var(--argus-light);
+    border-color: var(--argus-green);
 }
 
 /* ── Main Content ── */
@@ -244,8 +244,8 @@ main {
 
 /* ── Badges ── */
 .badge {
-    background: var(--sorcc-green);
-    color: var(--sorcc-light);
+    background: var(--argus-green);
+    color: var(--argus-light);
     padding: 2px 10px;
     border-radius: var(--radius-pill);
     font-size: var(--font-sm);
@@ -269,10 +269,10 @@ main {
     font-size: var(--font-sm);
     font-weight: 600;
     padding: 8px 18px;
-    border: 1px solid var(--sorcc-green-dark);
+    border: 1px solid var(--argus-green-dark);
     border-radius: var(--radius-md);
-    background: linear-gradient(180deg, var(--sorcc-green), var(--sorcc-green-dark));
-    color: var(--sorcc-light);
+    background: linear-gradient(180deg, var(--argus-green), var(--argus-green-dark));
+    color: var(--argus-light);
     cursor: pointer;
     transition: filter var(--transition-fast), transform var(--transition-fast);
     min-height: 32px;
@@ -342,7 +342,7 @@ select {
 }
 input:focus, select:focus {
     outline: none;
-    border-color: var(--sorcc-green);
+    border-color: var(--argus-green);
     box-shadow: var(--glow-green);
 }
 
@@ -376,8 +376,8 @@ input:focus, select:focus {
     transition: transform var(--transition-normal), background var(--transition-normal);
 }
 .toggle input:checked + .toggle-slider {
-    background: var(--sorcc-green);
-    border-color: var(--sorcc-green);
+    background: var(--argus-green);
+    border-color: var(--argus-green);
 }
 .toggle input:checked + .toggle-slider::before {
     transform: translateX(20px);
@@ -434,8 +434,8 @@ input:focus, select:focus {
 
 .toast-success {
     background: var(--success-bg);
-    border: 1px solid var(--sorcc-green);
-    color: var(--sorcc-light);
+    border: 1px solid var(--argus-green);
+    color: var(--argus-light);
 }
 .toast-info {
     background: var(--info-bg);
@@ -480,11 +480,11 @@ footer::before {
     left: 0;
     right: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent, var(--sorcc-green), transparent);
+    background: linear-gradient(90deg, transparent, var(--argus-green), transparent);
 }
 
 .footer-classification {
-    color: var(--sorcc-muted);
+    color: var(--argus-muted);
     font-weight: 700;
     letter-spacing: var(--ls-wide);
 }

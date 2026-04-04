@@ -1,4 +1,4 @@
-/* SORCC-PI Dashboard — Operations Tab Controller */
+/* Argus Dashboard — Operations Tab Controller */
 
 (function () {
     "use strict";
@@ -85,7 +85,7 @@
     var deviceFetchInFlight = false;
 
     function fetchDevices() {
-        if (window.SORCC.getActiveTab() !== "operations") return;
+        if (window.ARGUS.getActiveTab() !== "operations") return;
         if (activeSubTab !== "live" && activeSubTab !== "spectrum") return;
         if (deviceFetchInFlight) return;
         deviceFetchInFlight = true;
@@ -187,7 +187,7 @@
             // GPS state comes from status polling — just show device-based info
             var hasLocated = devices.some(function (d) { return d.lat && d.lon && d.lat !== 0; });
             exportGps.textContent = hasLocated ? "Fix available" : "No fix (indoor)";
-            exportGps.style.color = hasLocated ? "var(--sorcc-green-light)" : "var(--signal-warm)";
+            exportGps.style.color = hasLocated ? "var(--argus-green-light)" : "var(--signal-warm)";
         }
     }
 
@@ -360,7 +360,7 @@
             if (history[j] !== null) { firstValid = history[j]; break; }
         }
         var trending = (lastValid !== null && firstValid !== null) ? lastValid - firstValid : 0;
-        var color = trending > 3 ? "var(--signal-hot)" : trending < -3 ? "var(--signal-cold)" : "var(--sorcc-green-light, #A6BC92)";
+        var color = trending > 3 ? "var(--signal-hot)" : trending < -3 ? "var(--signal-cold)" : "var(--argus-green-light, #A6BC92)";
 
         return '<svg class="sparkline" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
             '<polyline points="' + points.join(" ") + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
@@ -372,8 +372,8 @@
         var count = document.getElementById("device-count");
         if (!list) return;
 
-        var escapeHtml = window.SORCC.escapeHtml;
-        var signalToPercent = window.SORCC.signalToPercent;
+        var escapeHtml = window.ARGUS.escapeHtml;
+        var signalToPercent = window.ARGUS.signalToPercent;
 
         // Filter by PHY type or frequency band
         var filtered = devices;
@@ -476,7 +476,7 @@
             // Activity bar instead of signal bar
             // Map packets logarithmically: 1→5%, 10→25%, 100→50%, 1000→75%, 10000→100%
             var pktPct = packets > 0 ? Math.min(100, Math.max(5, Math.log10(packets) * 25)) : 0;
-            var actColor = activity >= 3 ? "var(--signal-hot)" : activity >= 2 ? "var(--signal-warm)" : activity >= 1 ? "var(--sorcc-green-light)" : "var(--text-dim)";
+            var actColor = activity >= 3 ? "var(--signal-hot)" : activity >= 2 ? "var(--signal-warm)" : activity >= 1 ? "var(--argus-green-light)" : "var(--text-dim)";
             var actCls = activity >= 2 ? "strong" : activity >= 1 ? "medium" : "weak";
 
             // For WiFi devices with real signal, use signal display
@@ -527,7 +527,7 @@
             if (!query) {
                 ssidInput.focus();
                 ssidInput.style.borderColor = "var(--danger)";
-                window.SORCC.showToast("Enter a target SSID or MAC address", "error");
+                window.ARGUS.showToast("Enter a target SSID or MAC address", "error");
                 setTimeout(function () { ssidInput.style.borderColor = ""; }, 2000);
                 return;
             }
@@ -748,7 +748,7 @@
             rssiHistory.push(act >= 3 ? -30 : act >= 2 ? -50 : act >= 1 ? -70 : -100);
         } else {
             // WiFi hunt: use signal strength as before
-            var pct = window.SORCC.signalToPercent(sig);
+            var pct = window.ARGUS.signalToPercent(sig);
             var sigDelta = sig - prevSignal;
             updateGaugeArc(pct);
             sigValue.textContent = sig + " dBm";
@@ -864,9 +864,9 @@
                 var mac = document.getElementById("detail-mac");
                 if (mac && mac.textContent !== "--") {
                     navigator.clipboard.writeText(mac.textContent).then(function () {
-                        window.SORCC.showToast("MAC copied: " + mac.textContent, "success");
+                        window.ARGUS.showToast("MAC copied: " + mac.textContent, "success");
                     }).catch(function () {
-                        window.SORCC.showToast("Copy failed — use Ctrl+C", "error");
+                        window.ARGUS.showToast("Copy failed — use Ctrl+C", "error");
                     });
                 }
             });
@@ -883,8 +883,8 @@
                 var mapTab = document.querySelector('.sub-tab[data-subtab="map"]');
                 if (mapTab) mapTab.click();
                 // Center map on device if coordinates exist
-                if (!isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0 && window.SORCC.centerMap) {
-                    window.SORCC.centerMap(lat, lon);
+                if (!isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0 && window.ARGUS.centerMap) {
+                    window.ARGUS.centerMap(lat, lon);
                 }
             });
         }
@@ -1607,17 +1607,17 @@
                     return;
                 }
                 if (data.status === "ok" || data.status === "partial") {
-                    window.SORCC.showToast("Switched to profile: " + id, "success");
+                    window.ARGUS.showToast("Switched to profile: " + id, "success");
                     fetchProfiles();
                     if (data.errors && data.errors.length) {
-                        window.SORCC.showToast("Warning: " + data.errors[0], "info");
+                        window.ARGUS.showToast("Warning: " + data.errors[0], "info");
                     }
                 } else {
-                    window.SORCC.showToast("Failed to switch profile: " + (data.detail || data.error || "Unknown error"), "error");
+                    window.ARGUS.showToast("Failed to switch profile: " + (data.detail || data.error || "Unknown error"), "error");
                 }
             })
             .catch(function (err) {
-                window.SORCC.showToast("Profile switch failed: " + err.message, "error");
+                window.ARGUS.showToast("Profile switch failed: " + err.message, "error");
             });
     }
 
@@ -1644,15 +1644,15 @@
                         var url = URL.createObjectURL(blob);
                         var a = document.createElement("a");
                         a.href = url;
-                        a.download = "sorcc-survey.kml";
+                        a.download = "argus-survey.kml";
                         a.click();
                         URL.revokeObjectURL(url);
                         btn.textContent = "Download KML File";
                         btn.disabled = false;
-                        window.SORCC.showToast("KML export complete", "success");
+                        window.ARGUS.showToast("KML export complete", "success");
                     })
                     .catch(function (err) {
-                        window.SORCC.showToast("Export failed: " + err.message, "error");
+                        window.ARGUS.showToast("Export failed: " + err.message, "error");
                         btn.textContent = "Download KML File";
                         btn.disabled = false;
                     });
@@ -1679,15 +1679,15 @@
                         var url = URL.createObjectURL(blob);
                         var a = document.createElement("a");
                         a.href = url;
-                        a.download = "sorcc-survey.csv";
+                        a.download = "argus-survey.csv";
                         a.click();
                         URL.revokeObjectURL(url);
                         btn.textContent = "Download CSV File";
                         btn.disabled = false;
-                        window.SORCC.showToast("CSV export complete", "success");
+                        window.ARGUS.showToast("CSV export complete", "success");
                     })
                     .catch(function (err) {
-                        window.SORCC.showToast("Export failed: " + err.message, "error");
+                        window.ARGUS.showToast("Export failed: " + err.message, "error");
                         btn.textContent = "Download CSV File";
                         btn.disabled = false;
                     });
@@ -1707,13 +1707,13 @@
                     .then(function (blob) {
                         var url = URL.createObjectURL(blob);
                         var a = document.createElement("a"); a.href = url;
-                        a.download = "sorcc-hunt-waypoints.waypoints"; a.click();
+                        a.download = "argus-hunt-waypoints.waypoints"; a.click();
                         URL.revokeObjectURL(url);
                         btn.textContent = "Download Waypoints"; btn.disabled = false;
-                        window.SORCC.showToast("Waypoints export complete", "success");
+                        window.ARGUS.showToast("Waypoints export complete", "success");
                     })
                     .catch(function (err) {
-                        window.SORCC.showToast("Export failed: " + err.message, "error");
+                        window.ARGUS.showToast("Export failed: " + err.message, "error");
                         btn.textContent = "Download Waypoints"; btn.disabled = false;
                     });
             });
@@ -1733,13 +1733,13 @@
                     .then(function (blob) {
                         var url = URL.createObjectURL(blob);
                         var a = document.createElement("a"); a.href = url;
-                        a.download = "sorcc-cot.xml"; a.click();
+                        a.download = "argus-cot.xml"; a.click();
                         URL.revokeObjectURL(url);
                         btn.textContent = "Download CoT XML"; btn.disabled = false;
-                        window.SORCC.showToast("CoT XML export complete", "success");
+                        window.ARGUS.showToast("CoT XML export complete", "success");
                     })
                     .catch(function (err) {
-                        window.SORCC.showToast("Export failed: " + err.message, "error");
+                        window.ARGUS.showToast("Export failed: " + err.message, "error");
                         btn.textContent = "Download CoT XML"; btn.disabled = false;
                     });
             });
@@ -1756,7 +1756,7 @@
         var btnText = document.getElementById("wifi-capture-btn-text");
         var warningEl = document.getElementById("wifi-capture-warning");
         var adapterEl = document.getElementById("wifi-adapter-info");
-        var escapeHtml = window.SORCC.escapeHtml;
+        var escapeHtml = window.ARGUS.escapeHtml;
         if (!statusEl || !btnEl) return;
 
         btnEl.disabled = false;
@@ -1854,15 +1854,15 @@
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (data.status === "ok") {
-                        window.SORCC.showToast(data.detail, "success");
+                        window.ARGUS.showToast(data.detail, "success");
                         updateWifiCaptureUI(data);
                     } else {
-                        window.SORCC.showToast(data.detail || "Toggle failed", "error");
+                        window.ARGUS.showToast(data.detail || "Toggle failed", "error");
                         btnEl.disabled = false;
                     }
                 })
                 .catch(function (err) {
-                    window.SORCC.showToast("WiFi capture toggle failed: " + err, "error");
+                    window.ARGUS.showToast("WiFi capture toggle failed: " + err, "error");
                     btnEl.disabled = false;
                     pollWifiCaptureStatus();
                 });
@@ -1875,7 +1875,7 @@
     // ── Activity Feed ──────────────────────────────────────
 
     function fetchActivityFeed() {
-        if (window.SORCC.getActiveTab() !== "operations") return;
+        if (window.ARGUS.getActiveTab() !== "operations") return;
         if (activeSubTab !== "live") return;
 
         fetch("/api/activity", {
@@ -1978,7 +1978,7 @@
     }
 
     function fetchLogs() {
-        if (window.SORCC.getActiveTab() !== "operations") return;
+        if (window.ARGUS.getActiveTab() !== "operations") return;
         if (activeSubTab !== "logs") return;
         if (logPaused) return;
 

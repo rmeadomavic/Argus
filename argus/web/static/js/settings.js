@@ -1,4 +1,4 @@
-/* SORCC-PI Dashboard — Settings Tab Controller */
+/* Argus Dashboard — Settings Tab Controller */
 
 (function () {
     "use strict";
@@ -43,7 +43,7 @@
                 if (retries > 0) {
                     setTimeout(function () { loadConfig(retries - 1); }, 2000);
                 } else {
-                    window.SORCC.showToast("Failed to load config: " + err.message, "error");
+                    window.ARGUS.showToast("Failed to load config: " + err.message, "error");
                 }
             });
     }
@@ -149,13 +149,13 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data.status === "ok" || data.ok || data.success) {
-                    window.SORCC.showToast("Configuration saved", "success");
+                    window.ARGUS.showToast("Configuration saved", "success");
                 } else {
-                    window.SORCC.showToast("Failed to save: " + (data.detail || data.error || "Unknown error"), "error");
+                    window.ARGUS.showToast("Failed to save: " + (data.detail || data.error || "Unknown error"), "error");
                 }
             })
             .catch(function (err) {
-                window.SORCC.showToast("Save failed: " + err.message, "error");
+                window.ARGUS.showToast("Save failed: " + err.message, "error");
             });
     }
 
@@ -166,14 +166,14 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data.status === "ok" || data.ok || data.success) {
-                    window.SORCC.showToast("Factory reset complete", "success");
+                    window.ARGUS.showToast("Factory reset complete", "success");
                     loadConfig();
                 } else {
-                    window.SORCC.showToast("Factory reset failed", "error");
+                    window.ARGUS.showToast("Factory reset failed", "error");
                 }
             })
             .catch(function (err) {
-                window.SORCC.showToast("Factory reset failed: " + err.message, "error");
+                window.ARGUS.showToast("Factory reset failed: " + err.message, "error");
             });
     }
 
@@ -182,13 +182,13 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data.status === "ok") {
-                    window.SORCC.showToast(data.detail, "success");
+                    window.ARGUS.showToast(data.detail, "success");
                 } else {
-                    window.SORCC.showToast(data.detail || "WiFi apply failed", "error");
+                    window.ARGUS.showToast(data.detail || "WiFi apply failed", "error");
                 }
             })
             .catch(function (err) {
-                window.SORCC.showToast("WiFi apply failed: " + err.message, "error");
+                window.ARGUS.showToast("WiFi apply failed: " + err.message, "error");
             });
     }
 
@@ -199,10 +199,10 @@
                 return r.json();
             })
             .then(function () {
-                window.SORCC.showToast("LTE modem restarting...", "success");
+                window.ARGUS.showToast("LTE modem restarting...", "success");
             })
             .catch(function () {
-                window.SORCC.showToast("Use terminal: sudo mmcli -m 0 --reset", "info");
+                window.ARGUS.showToast("Use terminal: sudo mmcli -m 0 --reset", "info");
             });
     }
 
@@ -216,13 +216,13 @@
                 var url = URL.createObjectURL(blob);
                 var a = document.createElement("a");
                 a.href = url;
-                a.download = "sorcc-config.json";
+                a.download = "argus-config.json";
                 a.click();
                 URL.revokeObjectURL(url);
-                window.SORCC.showToast("Config exported", "success");
+                window.ARGUS.showToast("Config exported", "success");
             })
             .catch(function (err) {
-                window.SORCC.showToast("Export failed: " + err.message, "error");
+                window.ARGUS.showToast("Export failed: " + err.message, "error");
             });
     }
 
@@ -237,7 +237,7 @@
                 try {
                     JSON.parse(e.target.result); // validate JSON
                 } catch (err) {
-                    window.SORCC.showToast("Invalid JSON file", "error");
+                    window.ARGUS.showToast("Invalid JSON file", "error");
                     return;
                 }
                 fetch("/api/config/import", {
@@ -248,14 +248,14 @@
                     .then(function (r) { return r.json(); })
                     .then(function (data) {
                         if (data.status === "ok" || data.ok || data.success) {
-                            window.SORCC.showToast("Config imported — reloading...", "success");
+                            window.ARGUS.showToast("Config imported — reloading...", "success");
                             loadConfig();
                         } else {
-                            window.SORCC.showToast("Import failed: " + (data.detail || "Unknown error"), "error");
+                            window.ARGUS.showToast("Import failed: " + (data.detail || "Unknown error"), "error");
                         }
                     })
                     .catch(function (err) {
-                        window.SORCC.showToast("Import failed: " + err.message, "error");
+                        window.ARGUS.showToast("Import failed: " + err.message, "error");
                     });
             };
             reader.readAsText(input.files[0]);
@@ -275,7 +275,7 @@
         var resetBtn = document.getElementById("btn-settings-reset");
         if (resetBtn) resetBtn.addEventListener("click", function () {
             loadConfig();
-            window.SORCC.showToast("Config reloaded", "info");
+            window.ARGUS.showToast("Config reloaded", "info");
         });
 
         var factoryBtn = document.getElementById("btn-factory-reset");
@@ -302,14 +302,14 @@
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (data.status === "ok" || data.ok || data.success) {
-                        window.SORCC.showToast("Config saved, applying WiFi...", "info");
+                        window.ARGUS.showToast("Config saved, applying WiFi...", "info");
                         setTimeout(applyWifi, 500);
                     } else {
-                        window.SORCC.showToast("Config save failed — WiFi not applied", "error");
+                        window.ARGUS.showToast("Config save failed — WiFi not applied", "error");
                     }
                 })
                 .catch(function (err) {
-                    window.SORCC.showToast("Config save failed: " + err.message, "error");
+                    window.ARGUS.showToast("Config save failed: " + err.message, "error");
                 });
         });
 
