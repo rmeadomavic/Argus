@@ -8,6 +8,7 @@
     var KISMET_PORT_MAX = 65535;
     var schema = null;
 
+    // Merged behavior: preserve Kismet port bounds while using schema-driven field mappings.
     // Schema-driven settings map: one source of truth for form IDs <-> config keys.
     var FIELD_MAP = [
         { id: "cfg-hostname", section: "general", key: "hostname" },
