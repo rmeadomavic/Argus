@@ -317,7 +317,7 @@
                         knownError.toastShown = true;
                         throw knownError;
                     }
-                    return r.json().catch(function () { return {}; }).then(function (data) {
+                    return r.json().then(function (data) {
                         return { ok: r.ok, status: r.status, data: data };
                     });
                 })
