@@ -264,6 +264,24 @@
     }
 
     function importConfig() {
+        function extractImportError(data, fallback) {
+            if (!data) return fallback;
+            var detail = data.detail || data.error || data.message;
+            if (typeof detail === "string") return detail;
+            if (detail && typeof detail === "object") {
+                var parts = [];
+                if (detail.message) parts.push(detail.message);
+                if (Array.isArray(detail.errors) && detail.errors.length) {
+                    parts.push(detail.errors.join("; "));
+                }
+                if (Array.isArray(detail.warnings) && detail.warnings.length) {
+                    parts.push("Warnings: " + detail.warnings.join("; "));
+                }
+                if (parts.length) return parts.join(" ");
+            }
+            return fallback;
+        }
+
         var input = document.createElement("input");
         input.type = "file";
         input.accept = ".json,application/json";
@@ -277,18 +295,26 @@
                     window.ARGUS.showToast("Invalid JSON file", "error");
                     return;
                 }
+                var body = new FormData();
+                body.append("file", input.files[0]);
+
                 fetch("/api/config/import", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: e.target.result
+                    body: body
                 })
-                    .then(function (r) { return r.json(); })
-                    .then(function (data) {
+                    .then(function (r) {
+                        return r.json().catch(function () { return {}; }).then(function (data) {
+                            return { ok: r.ok, status: r.status, data: data };
+                        });
+                    })
+                    .then(function (result) {
+                        var data = result.data;
                         if (data.status === "ok" || data.ok || data.success) {
                             window.ARGUS.showToast("Config imported — reloading...", "success");
                             loadConfig();
                         } else {
-                            window.ARGUS.showToast("Import failed: " + (data.detail || "Unknown error"), "error");
+                            var reason = extractImportError(data, "HTTP " + result.status);
+                            window.ARGUS.showToast("Import failed: " + reason, "error");
                         }
                     })
                     .catch(function (err) {
