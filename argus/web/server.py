@@ -1595,6 +1595,15 @@ async def config_import(file: UploadFile = File(...)):
         vr = validate(str(get_config_path()))
 
         if vr.errors:
+            rollback_ok = restore_backup()
+            if not rollback_ok:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Config import failed schema validation and rollback failed: "
+                        "no backup file available to restore previous config."
+                    ),
+                )
             raise HTTPException(
                 status_code=422,
                 detail={
