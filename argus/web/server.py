@@ -50,6 +50,12 @@ _cached_modem_index: str | None = None
 _cached_modem_index_time: float = 0
 
 
+async def _run_blocking(func, *args, **kwargs):
+    """Run sync callables in the default thread pool to protect event loop latency."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+
+
 def _get_modem_index() -> str:
     """Dynamically detect the first ModemManager modem index.
 
@@ -379,7 +385,7 @@ async def _startup():
     # Initialize event logger with configured callsign
     events.callsign = _get_callsign()
     events.log("system_startup", version="2.0.0")
-    online, count = ks.check_online()
+    online, count = await ks.check_online_async()
     if online:
         log.info(f"Kismet online — {count} devices tracked")
         events.log("kismet_connected", device_count=count)
@@ -565,8 +571,7 @@ async def wifi_capture_toggle():
 
     Runs in a thread pool to avoid blocking the event loop during sleeps/subprocesses.
     """
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _wifi_capture_toggle_sync)
+    return await _run_blocking(_wifi_capture_toggle_sync)
 
 
 def _wifi_capture_toggle_sync():
@@ -777,15 +782,10 @@ async def get_status():
 
     async def _check_kismet():
         try:
-            loop = asyncio.get_running_loop()
-            r = await loop.run_in_executor(None, lambda: requests.get(
-                f"{ks.KISMET_URL}/system/status.json",
-                auth=(ks.KISMET_USER, ks.KISMET_PASS), timeout=2))
-            if r.status_code == 200:
+            data = await ks.get_async("/system/status.json", timeout=2)
+            if isinstance(data, dict):
                 status["kismet"] = True
-                data = r.json()
-                if isinstance(data, dict):
-                    status["device_count"] = data.get("kismet.system.devices.count", 0)
+                status["device_count"] = data.get("kismet.system.devices.count", 0)
         except Exception:
             pass
 
@@ -857,7 +857,7 @@ async def get_status():
 @app.get("/api/devices")
 async def get_devices():
     try:
-        data = ks.post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
+        data = await ks.post_async("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
             "kismet.device.base.macaddr", "kismet.device.base.name", "kismet.device.base.commonname",
             "kismet.device.base.type", "kismet.device.base.phyname",
             "kismet.device.base.signal/kismet.common.signal.last_signal",
@@ -932,7 +932,7 @@ async def get_devices():
 async def get_located_devices():
     """Return devices that have GPS coordinates for map plotting."""
     try:
-        data = ks.post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
+        data = await ks.post_async("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
             "kismet.device.base.macaddr", "kismet.device.base.name", "kismet.device.base.commonname",
             "kismet.device.base.type", "kismet.device.base.phyname",
             "kismet.device.base.signal/kismet.common.signal.last_signal",
@@ -981,7 +981,7 @@ async def get_target_rssi(query: str):
     log.info(f"Hunt: query='{query}' is_mac={is_mac_query}")
     events.log("hunt_query", query=query, mode="mac" if is_mac_query else "ssid")
     try:
-        data = ks.post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
+        data = await ks.post_async("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
             "kismet.device.base.macaddr", "kismet.device.base.name", "kismet.device.base.commonname",
             "kismet.device.base.type",
             "kismet.device.base.signal/kismet.common.signal.last_signal",
@@ -1099,7 +1099,7 @@ async def event_stream():
         while True:
             try:
                 # Check device count
-                online, count = ks.check_online()
+                online, count = await ks.check_online_async()
                 if count != last_count:
                     yield f"event: device_count\ndata: {json.dumps({'count': count, 'delta': count - last_count})}\n\n"
                     last_count = count
@@ -1143,9 +1143,13 @@ async def get_events_history(n: int = 50):
 async def get_gps():
     gps: dict[str, Any] = {"lat": None, "lon": None, "alt": None, "source": None}
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: subprocess.run(
-            ["mmcli", "-m", _get_modem_index(), "--location-get"], capture_output=True, text=True, timeout=5))
+        result = await _run_blocking(
+            subprocess.run,
+            ["mmcli", "-m", _get_modem_index(), "--location-get"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
         for line in result.stdout.splitlines():
             line = line.strip()
             if "latitude" in line.lower():
@@ -1163,7 +1167,7 @@ async def get_gps():
         pass
     if gps["lat"] is None:
         try:
-            data = ks.get("/gps/location.json")
+            data = await ks.get_async("/gps/location.json")
             if data and isinstance(data, dict):
                 loc = data.get("kismet.common.location.last", {})
                 gps["lat"] = loc.get("kismet.common.location.lat")
@@ -1191,14 +1195,21 @@ async def export_kml():
         kismet_files.extend(glob_mod.glob("/home/*/Kismet-*.kismet"))
     if kismet_files:
         latest = max(kismet_files, key=lambda f: Path(f).stat().st_mtime)
-        if subprocess.run(["which", "kismetdb_to_kml"], capture_output=True).returncode == 0:
-            result = subprocess.run(["kismetdb_to_kml", "-v", "--in", latest, "--out", output_kml], capture_output=True, text=True, timeout=30)
+        which_result = await _run_blocking(subprocess.run, ["which", "kismetdb_to_kml"], capture_output=True)
+        if which_result.returncode == 0:
+            result = await _run_blocking(
+                subprocess.run,
+                ["kismetdb_to_kml", "-v", "--in", latest, "--out", output_kml],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             if result.returncode == 0 and Path(output_kml).exists():
                 events.log("export_generated", format="kml", source="kismetdb")
                 return FileResponse(output_kml, media_type="application/vnd.google-earth.kml+xml", filename="argus-survey.kml")
 
     # Fallback: generate KML from GPS-located devices via Kismet API
-    located = _fetch_located_devices_for_cot()
+    located = await _fetch_located_devices_for_cot()
     if not located:
         raise HTTPException(status_code=404, detail="No GPS-located devices found. Get a GPS fix outdoors first.")
     kml = ET.Element("kml", xmlns="http://www.opengis.net/kml/2.2")
@@ -1339,10 +1350,10 @@ def _build_cot_event(device: dict, classification: dict) -> ET.Element:
     return event
 
 
-def _fetch_located_devices_for_cot() -> list[tuple[dict, dict]]:
+async def _fetch_located_devices_for_cot() -> list[tuple[dict, dict]]:
     """Fetch all located devices from Kismet and return (device, classification) tuples."""
     try:
-        data = ks.post("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
+        data = await ks.post_async("/devices/views/all/devices.json", data={"json": json.dumps({"fields": [
             "kismet.device.base.macaddr", "kismet.device.base.name", "kismet.device.base.commonname",
             "kismet.device.base.type", "kismet.device.base.phyname",
             "kismet.device.base.signal/kismet.common.signal.last_signal",
@@ -1383,7 +1394,7 @@ def _fetch_located_devices_for_cot() -> list[tuple[dict, dict]]:
 @app.get("/api/cot")
 async def export_cot_all():
     """Export CoT XML for all located devices (ATAK integration)."""
-    located = _fetch_located_devices_for_cot()
+    located = await _fetch_located_devices_for_cot()
     if not located:
         raise HTTPException(status_code=404, detail="No devices with GPS coordinates found")
 
@@ -1444,7 +1455,7 @@ async def export_cot_self():
 async def export_cot_device(mac: str):
     """Export CoT XML for a specific device by MAC address (ATAK integration)."""
     mac_normalized = mac.strip().upper()
-    located = _fetch_located_devices_for_cot()
+    located = await _fetch_located_devices_for_cot()
 
     for device, classification in located:
         if device["mac"].upper() == mac_normalized:
@@ -1463,7 +1474,7 @@ async def export_waypoints():
     Each located device becomes a waypoint. Useful for autonomous hunt missions:
     fly to each device's last-known position for signal convergence.
     """
-    located = _fetch_located_devices_for_cot()
+    located = await _fetch_located_devices_for_cot()
     if not located:
         raise HTTPException(status_code=404, detail="No devices with GPS coordinates found")
 
@@ -1659,8 +1670,7 @@ def _run_check(name, category, fn):
 
 async def _run_check_async(name, category, fn):
     """Run a blocking preflight check in an executor to avoid blocking the event loop."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _run_check, name, category, fn)
+    return await _run_blocking(_run_check, name, category, fn)
 
 def _check_sdr():
     result = subprocess.run(["lsusb"], capture_output=True, text=True, timeout=5)
