@@ -16,6 +16,7 @@ import socket
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from collections import OrderedDict
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -350,10 +351,57 @@ async def _startup_load_web_password():
 
 # classify_device imported from argus.web.oui
 
-# Track first-seen times and packet history for activity metrics
-_device_first_seen: dict[str, float] = {}
+# Track first-seen times and packet history for activity metrics.
+# Ordered maps let us prune oldest-first efficiently without repeated full scans.
+_ACTIVITY_MAX_ENTRIES = int(os.getenv("ARGUS_ACTIVITY_MAX_ENTRIES", "5000"))
+_ACTIVITY_MAX_AGE_SEC = int(os.getenv("ARGUS_ACTIVITY_MAX_AGE_SEC", "86400"))
+_SNAPSHOT_MAX_ENTRIES = int(os.getenv("ARGUS_SNAPSHOT_MAX_ENTRIES", str(_ACTIVITY_MAX_ENTRIES)))
+_SNAPSHOT_MAX_AGE_SEC = int(os.getenv("ARGUS_SNAPSHOT_MAX_AGE_SEC", str(_ACTIVITY_MAX_AGE_SEC)))
+
+_device_first_seen: OrderedDict[str, float] = OrderedDict()
 _device_packet_history: dict[str, list[int]] = {}
-_last_device_snapshot: dict[str, int] = {}
+_last_device_snapshot: OrderedDict[str, tuple[int, float]] = OrderedDict()
+_hunt_last_snapshot: OrderedDict[str, tuple[int, float]] = OrderedDict()
+
+
+def _prune_activity_state(now: float | None = None) -> None:
+    """Prune activity/snapshot maps by age and max size."""
+    now = now if now is not None else time.time()
+
+    while _device_first_seen:
+        mac, first_seen = next(iter(_device_first_seen.items()))
+        if (now - first_seen) <= _ACTIVITY_MAX_AGE_SEC and len(_device_first_seen) <= _ACTIVITY_MAX_ENTRIES:
+            break
+        _device_first_seen.pop(mac, None)
+        _last_device_snapshot.pop(mac, None)
+
+    _prune_snapshot_map(_last_device_snapshot, now=now)
+    _prune_snapshot_map(_hunt_last_snapshot, now=now)
+
+
+def _prune_snapshot_map(snapshot_map: OrderedDict[str, tuple[int, float]], now: float | None = None) -> None:
+    """Prune packet snapshot map oldest-first by age and size."""
+    now = now if now is not None else time.time()
+    while snapshot_map:
+        _, (_, seen_ts) = next(iter(snapshot_map.items()))
+        if (now - seen_ts) <= _SNAPSHOT_MAX_AGE_SEC and len(snapshot_map) <= _SNAPSHOT_MAX_ENTRIES:
+            break
+        snapshot_map.popitem(last=False)
+
+
+def _record_first_seen(mac: str, now: float) -> None:
+    if not mac or mac in _device_first_seen:
+        return
+    _device_first_seen[mac] = now
+    _device_first_seen.move_to_end(mac)
+
+
+def _snapshot_delta(snapshot_map: OrderedDict[str, tuple[int, float]], key: str, packets: int, now: float) -> int:
+    previous_packets = snapshot_map.get(key, (0, now))[0]
+    delta = max(0, packets - previous_packets)
+    snapshot_map[key] = (packets, now)
+    snapshot_map.move_to_end(key)
+    return delta
 
 
 def _load_profiles() -> dict:
@@ -870,6 +918,7 @@ async def get_devices():
     except HTTPException:
         return []
     now = time.time()
+    _prune_activity_state(now)
     devices = []
     for d in data if isinstance(data, list) else []:
         mac = d.get("kismet.device.base.macaddr", "")
@@ -883,13 +932,10 @@ async def get_devices():
         classification = classify_device(mac, name, dev_type)
 
         # Track first-seen for "new device" detection
-        if mac and mac not in _device_first_seen:
-            _device_first_seen[mac] = now
+        _record_first_seen(mac, now)
 
         # Calculate packet rate (packets per interval)
-        prev_packets = _last_device_snapshot.get(mac, 0)
-        packet_delta = max(0, packets - prev_packets)
-        _last_device_snapshot[mac] = packets
+        packet_delta = _snapshot_delta(_last_device_snapshot, mac, packets, now)
 
         # Activity level: 0-3 based on packet rate
         if packet_delta > 20:
@@ -925,6 +971,7 @@ async def get_devices():
         devices.append(device)
     # Sort by activity first (most active on top), then by packets
     devices.sort(key=lambda x: (x["activity"], x["packets"]), reverse=True)
+    _prune_activity_state(now)
     return devices
 
 
@@ -1039,9 +1086,7 @@ async def get_target_rssi(query: str):
         classification = classify_device(mac, name, best_device.get("kismet.device.base.type", ""))
 
         # Packet delta for BT proximity
-        prev = _last_device_snapshot.get(f"hunt_{mac}", 0)
-        delta = max(0, packets - prev)
-        _last_device_snapshot[f"hunt_{mac}"] = packets
+        delta = _snapshot_delta(_hunt_last_snapshot, mac, packets, time.time())
 
         result["found"] = True
         result["signal"] = sig if sig != 0 else -100
@@ -1064,24 +1109,29 @@ async def get_target_rssi(query: str):
 async def get_activity():
     """Return recently discovered devices and activity metrics."""
     now = time.time()
+    _prune_activity_state(now)
     recent = []
-    for mac, first in sorted(_device_first_seen.items(), key=lambda x: x[1], reverse=True):
+    recent_5min = 0
+    recent_1min = 0
+    for mac, first in reversed(_device_first_seen.items()):
         age = now - first
-        if age > 300:  # Only last 5 minutes
+        if age > 300:  # Ordered dict guarantees remaining entries are older
             break
+        recent_5min += 1
+        if age < 60:
+            recent_1min += 1
         cls = classify_device(mac, "", "")
-        recent.append({
-            "mac": mac,
-            "seconds_ago": int(age),
-            "manufacturer": cls["manufacturer"],
-            "category": cls["category"],
-        })
-        if len(recent) >= 50:
-            break
+        if len(recent) < 50:
+            recent.append({
+                "mac": mac,
+                "seconds_ago": int(age),
+                "manufacturer": cls["manufacturer"],
+                "category": cls["category"],
+            })
     return {
         "total_seen": len(_device_first_seen),
-        "recent_5min": len([1 for _, t in _device_first_seen.items() if now - t < 300]),
-        "recent_1min": len([1 for _, t in _device_first_seen.items() if now - t < 60]),
+        "recent_5min": recent_5min,
+        "recent_1min": recent_1min,
         "feed": recent[:20],
     }
 
@@ -1098,6 +1148,7 @@ async def event_stream():
         last_count = 0
         while True:
             try:
+                _prune_activity_state(time.time())
                 # Check device count
                 online, count = ks.check_online()
                 if count != last_count:
@@ -1106,7 +1157,11 @@ async def event_stream():
 
                 # Check for new devices in last 10 seconds
                 now = time.time()
-                new_macs = [mac for mac, t in _device_first_seen.items() if now - t < 10]
+                new_macs: list[str] = []
+                for mac, first_seen in reversed(_device_first_seen.items()):
+                    if (now - first_seen) > 10:
+                        break
+                    new_macs.append(mac)
                 if new_macs:
                     new_devices = []
                     for mac in new_macs[:5]:
