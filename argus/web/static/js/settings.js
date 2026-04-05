@@ -263,67 +263,93 @@
             });
     }
 
-    function importConfig() {
-        function extractImportError(data, fallback) {
-            if (!data) return fallback;
-            var detail = data.detail || data.error || data.message;
-            if (typeof detail === "string") return detail;
-            if (detail && typeof detail === "object") {
-                var parts = [];
-                if (detail.message) parts.push(detail.message);
-                if (Array.isArray(detail.errors) && detail.errors.length) {
-                    parts.push(detail.errors.join("; "));
-                }
-                if (Array.isArray(detail.warnings) && detail.warnings.length) {
-                    parts.push("Warnings: " + detail.warnings.join("; "));
-                }
-                if (parts.length) return parts.join(" ");
+    function extractImportError(data, fallback) {
+        if (!data) return fallback;
+        var detail = data.detail || data.error || data.message;
+        if (typeof detail === "string") return detail;
+        if (detail && typeof detail === "object") {
+            var parts = [];
+            if (detail.message) parts.push(detail.message);
+            if (Array.isArray(detail.errors) && detail.errors.length) {
+                parts.push(detail.errors.join("; "));
             }
-            return fallback;
+            if (Array.isArray(detail.warnings) && detail.warnings.length) {
+                parts.push("Warnings: " + detail.warnings.join("; "));
+            }
+            if (parts.length) return parts.join(" ");
         }
+        return fallback;
+    }
 
+    function importConfig() {
         var input = document.createElement("input");
         input.type = "file";
         input.accept = ".json,application/json";
         input.addEventListener("change", function () {
             if (!input.files || !input.files[0]) return;
-            var reader = new FileReader();
-            reader.onload = function (e) {
-                try {
-                    JSON.parse(e.target.result); // validate JSON
-                } catch (err) {
-                    window.ARGUS.showToast("Invalid JSON file", "error");
-                    return;
-                }
-                var body = new FormData();
-                body.append("file", input.files[0]);
+            uploadConfigFile(input.files[0], true);
+        });
+        input.click();
+    }
 
-                fetch("/api/config/import", {
-                    method: "POST",
-                    body: body
+    function uploadConfigFile(file, reloadOnSuccess) {
+        var reader = new FileReader();
+        reader.onload = function (e) {
+            try {
+                JSON.parse(e.target.result); // validate JSON before upload
+            } catch (err) {
+                window.ARGUS.showToast("Invalid JSON file", "error");
+                return;
+            }
+
+            var formData = new FormData();
+            formData.append("file", file, file.name || "argus-config.json");
+
+            fetch("/api/config/import", {
+                method: "POST",
+                body: formData
+            })
+                .then(function (r) {
+                    return r.json().catch(function () { return {}; }).then(function (data) {
+                        return { ok: r.ok, status: r.status, data: data };
+                    });
                 })
-                    .then(function (r) {
-                        return r.json().catch(function () { return {}; }).then(function (data) {
-                            return { ok: r.ok, status: r.status, data: data };
-                        });
-                    })
-                    .then(function (result) {
-                        var data = result.data;
-                        if (data.status === "ok" || data.ok || data.success) {
+                .then(function (result) {
+                    var data = result.data || {};
+                    if (result.ok && (data.status === "ok" || data.ok || data.success)) {
+                        if (reloadOnSuccess) {
                             window.ARGUS.showToast("Config imported — reloading...", "success");
                             loadConfig();
                         } else {
-                            var reason = extractImportError(data, "HTTP " + result.status);
-                            window.ARGUS.showToast("Import failed: " + reason, "error");
+                            window.ARGUS.showToast("Round-trip check passed: export re-imported successfully", "success");
                         }
-                    })
-                    .catch(function (err) {
+                    } else {
+                        var reason = extractImportError(data, "HTTP " + result.status);
+                        window.ARGUS.showToast("Import failed: " + reason, "error");
+                    }
+                })
+                .catch(function (err) {
+                    if (err && err.message) {
                         window.ARGUS.showToast("Import failed: " + err.message, "error");
-                    });
-            };
-            reader.readAsText(input.files[0]);
-        });
-        input.click();
+                    }
+                });
+        };
+        reader.readAsText(file);
+    }
+
+    function runConfigRoundTripCheck() {
+        fetch("/api/config/export")
+            .then(function (r) {
+                if (!r.ok) throw new Error("Export failed with HTTP " + r.status);
+                return r.blob();
+            })
+            .then(function (blob) {
+                var roundTripFile = new File([blob], "argus-config-roundtrip.json", { type: "application/json" });
+                uploadConfigFile(roundTripFile, false);
+            })
+            .catch(function (err) {
+                window.ARGUS.showToast("Round-trip check failed: " + err.message, "error");
+            });
     }
 
     // ── Init ────────────────────────────────────────────────
