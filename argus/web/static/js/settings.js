@@ -269,35 +269,76 @@
         input.accept = ".json,application/json";
         input.addEventListener("change", function () {
             if (!input.files || !input.files[0]) return;
-            var reader = new FileReader();
-            reader.onload = function (e) {
-                try {
-                    JSON.parse(e.target.result); // validate JSON
-                } catch (err) {
-                    window.ARGUS.showToast("Invalid JSON file", "error");
-                    return;
-                }
-                fetch("/api/config/import", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: e.target.result
+            uploadConfigFile(input.files[0], true);
+        });
+        input.click();
+    }
+
+    function uploadConfigFile(file, reloadOnSuccess) {
+        var reader = new FileReader();
+        reader.onload = function (e) {
+            try {
+                JSON.parse(e.target.result); // validate JSON before upload
+            } catch (err) {
+                window.ARGUS.showToast("Invalid JSON file", "error");
+                return;
+            }
+
+            var formData = new FormData();
+            formData.append("file", file, file.name || "argus-config.json");
+
+            fetch("/api/config/import", {
+                method: "POST",
+                body: formData
+            })
+                .then(function (r) {
+                    if (r.status === 422 || r.status === 415) {
+                        var detail = "Import expects multipart/form-data with a JSON file in the 'file' field.";
+                        window.ARGUS.showToast("Import rejected (" + r.status + "): " + detail, "error");
+                        var knownError = new Error(detail);
+                        knownError.toastShown = true;
+                        throw knownError;
+                    }
+                    return r.json().then(function (data) {
+                        return { ok: r.ok, status: r.status, data: data };
+                    });
                 })
-                    .then(function (r) { return r.json(); })
-                    .then(function (data) {
-                        if (data.status === "ok" || data.ok || data.success) {
+                .then(function (result) {
+                    var data = result.data || {};
+                    if (result.ok && (data.status === "ok" || data.ok || data.success)) {
+                        if (reloadOnSuccess) {
                             window.ARGUS.showToast("Config imported — reloading...", "success");
                             loadConfig();
                         } else {
-                            window.ARGUS.showToast("Import failed: " + (data.detail || "Unknown error"), "error");
+                            window.ARGUS.showToast("Round-trip check passed: export re-imported successfully", "success");
                         }
-                    })
-                    .catch(function (err) {
+                    } else {
+                        window.ARGUS.showToast("Import failed: " + (data.detail || "Unknown error"), "error");
+                    }
+                })
+                .catch(function (err) {
+                    if (err && err.toastShown) return;
+                    if (err && err.message) {
                         window.ARGUS.showToast("Import failed: " + err.message, "error");
-                    });
-            };
-            reader.readAsText(input.files[0]);
-        });
-        input.click();
+                    }
+                });
+        };
+        reader.readAsText(file);
+    }
+
+    function runConfigRoundTripCheck() {
+        fetch("/api/config/export")
+            .then(function (r) {
+                if (!r.ok) throw new Error("Export failed with HTTP " + r.status);
+                return r.blob();
+            })
+            .then(function (blob) {
+                var roundTripFile = new File([blob], "argus-config-roundtrip.json", { type: "application/json" });
+                uploadConfigFile(roundTripFile, false);
+            })
+            .catch(function (err) {
+                window.ARGUS.showToast("Round-trip check failed: " + err.message, "error");
+            });
     }
 
     // ── Init ────────────────────────────────────────────────
@@ -323,6 +364,9 @@
 
         var importBtn = document.getElementById("btn-config-import");
         if (importBtn) importBtn.addEventListener("click", importConfig);
+
+        var roundTripBtn = document.getElementById("btn-config-roundtrip");
+        if (roundTripBtn) roundTripBtn.addEventListener("click", runConfigRoundTripCheck);
 
         var lteBtn = document.getElementById("btn-restart-lte");
         if (lteBtn) lteBtn.addEventListener("click", restartLte);

@@ -101,7 +101,8 @@ sudo systemctl restart argus-dashboard  # to pick up changes
 
 ### Import/Export
 - **Export:** Settings tab → Export button (downloads JSON)
-- **Import:** Settings tab → Import button (upload JSON from another Pi)
+- **Import contract:** Settings tab → Import button uploads `multipart/form-data` with a single `file` field containing JSON (matches backend `/api/config/import` parameter).
+- **Round-trip check:** Settings tab → **Verify Export→Import** runs a quick UI integration check by exporting current config and re-importing it through the same endpoint.
 - **Factory Reset:** Settings tab → Factory Reset button
 
 ## Password Protection
