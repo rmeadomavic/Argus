@@ -310,6 +310,13 @@
                 body: formData
             })
                 .then(function (r) {
+                    if (r.status === 422 || r.status === 415) {
+                        var detail = "Import expects multipart/form-data with a JSON file in the 'file' field.";
+                        window.ARGUS.showToast("Import rejected (" + r.status + "): " + detail, "error");
+                        var knownError = new Error(detail);
+                        knownError.toastShown = true;
+                        throw knownError;
+                    }
                     return r.json().catch(function () { return {}; }).then(function (data) {
                         return { ok: r.ok, status: r.status, data: data };
                     });
@@ -329,6 +336,7 @@
                     }
                 })
                 .catch(function (err) {
+                    if (err && err.toastShown) return;
                     if (err && err.message) {
                         window.ARGUS.showToast("Import failed: " + err.message, "error");
                     }
