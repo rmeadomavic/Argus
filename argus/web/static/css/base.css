@@ -460,6 +460,11 @@ input:focus, select:focus {
     border: 1px solid var(--danger);
     color: #fca5a5;
 }
+.toast-warn {
+    background: var(--warning-bg);
+    border: 1px solid var(--warning);
+    color: #fcd34d;
+}
 
 @keyframes toast-in {
     from { transform: translateX(100%); opacity: 0; }

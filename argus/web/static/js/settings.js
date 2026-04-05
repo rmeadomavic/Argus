@@ -91,22 +91,15 @@
             "cfg-hostname":         { section: "general", key: "hostname" },
             "cfg-callsign":         { section: "general", key: "callsign" },
             "cfg-apn":              { section: "lte", key: "apn" },
-            "cfg-sim-pin":          { section: "lte", key: "sim_pin" },
             "cfg-gps-port":         { section: "gps", key: "serial_port" },
             "cfg-gps-baud":         { section: "gps", key: "serial_baud" },
             "cfg-kismet-url":       { section: "kismet", key: "port" },
             "cfg-kismet-user":      { section: "kismet", key: "user" },
             "cfg-kismet-pass":      { section: "kismet", key: "pass" },
-            "cfg-kismet-autostart": { section: "kismet", key: "autostart" },
             "cfg-dash-port":        { section: "dashboard", key: "port" },
             "cfg-dash-password":    { section: "dashboard", key: "password" },
-            "cfg-poll-interval":    { section: "dashboard", key: "poll_interval" },
-            "cfg-show-bt":          { section: "dashboard", key: "show_bluetooth" },
-            "cfg-show-sdr":         { section: "dashboard", key: "show_sdr" },
-            "cfg-ts-authkey":       { section: "tailscale", key: "authkey" },
             "cfg-ts-enabled":       { section: "tailscale", key: "enabled" },
             "cfg-pisugar-enabled":  { section: "pisugar", key: "enabled" },
-            "cfg-pisugar-warn":     { section: "pisugar", key: "low_battery_warn" },
             "cfg-wifi-ssid":        { section: "wifi", key: "ssid" },
             "cfg-wifi-pass":        { section: "wifi", key: "password" },
             "cfg-wifi-country":     { section: "wifi", key: "country_code" },
@@ -137,22 +130,15 @@
             "cfg-hostname":         { section: "general", key: "hostname" },
             "cfg-callsign":         { section: "general", key: "callsign" },
             "cfg-apn":              { section: "lte", key: "apn" },
-            "cfg-sim-pin":          { section: "lte", key: "sim_pin" },
             "cfg-gps-port":         { section: "gps", key: "serial_port" },
             "cfg-gps-baud":         { section: "gps", key: "serial_baud" },
             "cfg-kismet-url":       { section: "kismet", key: "port" },
             "cfg-kismet-user":      { section: "kismet", key: "user" },
             "cfg-kismet-pass":      { section: "kismet", key: "pass" },
-            "cfg-kismet-autostart": { section: "kismet", key: "autostart" },
             "cfg-dash-port":        { section: "dashboard", key: "port" },
             "cfg-dash-password":    { section: "dashboard", key: "password" },
-            "cfg-poll-interval":    { section: "dashboard", key: "poll_interval" },
-            "cfg-show-bt":          { section: "dashboard", key: "show_bluetooth" },
-            "cfg-show-sdr":         { section: "dashboard", key: "show_sdr" },
-            "cfg-ts-authkey":       { section: "tailscale", key: "authkey" },
             "cfg-ts-enabled":       { section: "tailscale", key: "enabled" },
             "cfg-pisugar-enabled":  { section: "pisugar", key: "enabled" },
-            "cfg-pisugar-warn":     { section: "pisugar", key: "low_battery_warn" },
             "cfg-wifi-ssid":        { section: "wifi", key: "ssid" },
             "cfg-wifi-pass":        { section: "wifi", key: "password" },
             "cfg-wifi-country":     { section: "wifi", key: "country_code" },
@@ -173,6 +159,14 @@
         return config;
     }
 
+    function showSkippedWarning(skipped) {
+        if (!Array.isArray(skipped) || skipped.length === 0) return;
+        window.ARGUS.showToast(
+            "Some settings were not saved: " + skipped.join(", "),
+            "warn"
+        );
+    }
+
     // ── Apply Config ────────────────────────────────────────
 
     function applyConfig() {
@@ -185,6 +179,7 @@
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
+                showSkippedWarning(data.skipped);
                 if (data.status === "ok" || data.ok || data.success) {
                     window.ARGUS.showToast("Configuration saved", "success");
                 } else {
@@ -338,6 +333,7 @@
             })
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
+                    showSkippedWarning(data.skipped);
                     if (data.status === "ok" || data.ok || data.success) {
                         window.ARGUS.showToast("Config saved, applying WiFi...", "info");
                         setTimeout(applyWifi, 500);
