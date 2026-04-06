@@ -1786,6 +1786,23 @@ def _check_source_config():
     if configured: return "pass", f"Active sources: {', '.join(configured)}"
     return "fail", "No sources configured"
 
+
+def has_token() -> bool:
+    """Compatibility helper for newer app-factory integrations."""
+    return bool(_AUTH_TOKEN)
+
+
+# Compatibility aliases for app-factory branches that import these names.
+AuthMiddleware = _AuthMiddleware
+InstructorCORSMiddleware = _InstructorCORSMiddleware
+TokenAuthMiddleware = _TokenAuthMiddleware
+RequestLogMiddleware = _RequestLogMiddleware
+
+
+def create_app() -> FastAPI:
+    """Compatibility app factory; returns the module-level application."""
+    return app
+
 def _check_gps_fix():
     result = subprocess.run(["mmcli", "-m", _get_modem_index(), "--location-get"], capture_output=True, text=True, timeout=5)
     lat, lon = None, None
