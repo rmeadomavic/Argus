@@ -222,13 +222,20 @@ _AUTH_TOKEN: str | None = None
 _AUTH_PROTECTED_PREFIXES = {"/api/profiles/switch", "/api/wifi-capture/toggle", "/api/config"}
 _AUTH_OPEN_PREFIXES = {"/api/status", "/api/devices", "/api/activity", "/api/events", "/api/logs", "/api/gps", "/api/export", "/api/cot", "/api/waypoints", "/api/preflight", "/static", "/"}
 
-try:
-    import configparser as _cp
-    _cfg = _cp.ConfigParser()
-    _cfg.read(get_config_path())
-    _AUTH_TOKEN = _cfg.get("dashboard", "api_token", fallback="").strip() or None
-except Exception:
-    pass
+
+def _load_auth_token() -> str | None:
+    """Load dashboard API token from the configured argus.ini path."""
+    try:
+        import configparser as _cp
+
+        _cfg = _cp.ConfigParser()
+        _cfg.read(get_config_path())
+        return _cfg.get("dashboard", "api_token", fallback="").strip() or None
+    except Exception:
+        return None
+
+
+_AUTH_TOKEN = _load_auth_token()
 
 
 class _TokenAuthMiddleware(BaseHTTPMiddleware):

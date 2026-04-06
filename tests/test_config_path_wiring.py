@@ -1,5 +1,4 @@
 import asyncio
-import importlib
 import runpy
 import sys
 from pathlib import Path
@@ -24,12 +23,16 @@ def _write_config(path: Path, *, api_token: str = "", tls_enabled: str = "false"
 def test_token_auth_uses_argus_config_path_env(monkeypatch, tmp_path):
     cfg_path = tmp_path / "argus.ini"
     _write_config(cfg_path, api_token="env-token-123")
+    captured_path = {"value": None}
 
     monkeypatch.setenv("ARGUS_CONFIG_PATH", str(cfg_path))
-    reloaded = importlib.reload(server)
+    monkeypatch.setattr(server, "set_config_path", lambda path: captured_path.__setitem__("value", Path(path)))
+    monkeypatch.setattr(server, "get_config_path", lambda: cfg_path)
 
-    assert reloaded.get_config_path() == cfg_path
-    assert reloaded._AUTH_TOKEN == "env-token-123"
+    server._apply_config_path_from_env()
+
+    assert captured_path["value"] == cfg_path
+    assert server._load_auth_token() == "env-token-123"
 
 
 def test_config_validation_uses_single_config_path(monkeypatch, tmp_path):
