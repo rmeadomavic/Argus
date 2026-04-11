@@ -371,15 +371,4 @@ sudo mmcli -m 0 --location-get
 
 ## Course Documents
 
-The `courseware/` directory contains the full lesson plan presentation:
-
-- **Slide 1** — Title slide (20 Sep 2024)
-- **Slide 2** — Markings (DFARS, Distribution Statement C)
-- **Slide 3** — Outline: Assembly, OS, Networking, Kismet, Testing, Troubleshooting
-- **Slides 4-6** — Admin info, learning objectives, introduction
-- **Slides 7-12** — Parts list, assembly (PiSugar, SixFab, SDR), Nooelec SDR types
-- **Slide 13** — Installing OS: RPi Imager → Kali Linux 64-bit
-- **Slides 14-17** — OS customization, LTE config, NetworkManager, crontab
-- **Slides 18-20** — Kismet configuration and testing
-- **Slides 21-24** — TPMS, RF recording with GQRX, IMSI capture, Google Earth export
-- **Slides 25-29** — Quiz, review, troubleshooting, Q&A, contacts
+The `courseware/` directory contains reference slide images (Slide1.JPG through Slide29.JPG).

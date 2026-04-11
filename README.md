@@ -275,5 +275,4 @@ bash scripts/argus-preflight.sh --json
 ## Course Materials
 
 Slides are in `courseware/`:
-- `4.3 Raspberry Pi Payload Integrator_v2 - Copy.pptx` — Lesson plan slides
 - `Slide1.JPG` through `Slide29.JPG` — Individual slides for reference
