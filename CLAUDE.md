@@ -9,11 +9,9 @@ This project is part of the Argus ecosystem alongside Hydra.
 
 ## Project Context
 
-Argus is the software toolkit for the **Robotics Capabilities Course**
-Module 4.3: Raspberry Pi Payload Integrator. It transforms a
-Raspberry Pi 4 into a multi-capability RF survey payload that students mount on
-robotics platforms — including 10" FPV quadcopters — for wireless reconnaissance
-training exercises.
+Argus transforms a Raspberry Pi 4 into a multi-capability RF survey payload
+that students mount on robotics platforms — including 10" FPV quadcopters — for
+wireless reconnaissance training exercises.
 
 The primary training mission is an airborne WiFi hunt: students fly the payload
 over an area to locate a known WiFi SSID, track its signal strength in real time,
@@ -327,7 +325,7 @@ For dual-tab browser sessions (Claude Code CLI + UI audit):
 **Tab 2 prompt (Visual QA):**
 > You are a visual QA auditor for the Argus dashboard at 100.71.115.45:8080.
 > Audit the UI from three personas: 1) A soldier using it in the field on a phone,
-> 2) An instructor demoing to a classroom, 3) A general visiting Oak Grove.
+> 2) An instructor demoing to a classroom, 3) A VIP deciding whether to fund this.
 > Report every visual bug, UX issue, broken feature, and polish opportunity.
 > The CLI session is fixing things live — re-check after each fix. Be ruthless.
 
@@ -375,7 +373,7 @@ sudo mmcli -m 0 --location-get
 
 The `courseware/` directory contains the full lesson plan presentation:
 
-- **Slide 1** — Title: Raspberry Pi Payload Integrator (20 Sep 2024)
+- **Slide 1** — Title slide (20 Sep 2024)
 - **Slide 2** — Markings (DFARS, Distribution Statement C)
 - **Slide 3** — Outline: Assembly, OS, Networking, Kismet, Testing, Troubleshooting
 - **Slides 4-6** — Admin info, learning objectives, introduction
